@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import {
+	persistAgentDispatchAdmission,
 	createAgentDispatchProcessor,
 	createFlueContext,
 	configureFlueRuntime,
 	InMemoryDispatchQueue,
+	InMemoryRunStore,
 	InMemorySessionStore,
 	receiveExternalDelivery,
 	type DispatchInput,
@@ -235,14 +237,22 @@ describe('external delivery fan-out', () => {
 		await expect(dispatch(localAgent, { id: 'guild:1', input: null })).rejects.toThrow('not a discovered default-exported agent');
 	});
 
-	it('rejects global dispatch when Cloudflare target forwarding is not implemented', async () => {
+	it('admits global dispatch through a configured Cloudflare target forwarding queue', async () => {
+		const dispatches: DispatchInput[] = [];
 		configureFlueRuntime({
 			target: 'cloudflare',
-			dispatchQueue: new InMemoryDispatchQueue(),
+			dispatchQueue: {
+				async enqueue(input) {
+					dispatches.push(input);
+					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+				},
+			},
 			manifest: { agents: [{ name: 'moderator', channels: {}, receive: false, created: true }] },
 		});
 
-		await expect(dispatch({ agent: 'moderator', id: 'guild:1', input: null })).rejects.toThrow('not supported on Cloudflare');
+		const receipt = await dispatch({ agent: 'moderator', id: 'guild:1', input: null });
+		expect(receipt).toMatchObject({ dispatchId: expect.any(String), acceptedAt: expect.any(String) });
+		expect(dispatches[0]).toMatchObject({ targetAgent: 'moderator', id: 'guild:1', session: 'default', input: null });
 	});
 
 	it('isolates receive failures per subscribed agent', async () => {
@@ -485,6 +495,52 @@ describe('external delivery fan-out', () => {
 		});
 	});
 
+	it('admits a durable dispatch only after storing its recoverable run payload', async () => {
+		const runStore = new InMemoryRunStore();
+		const storedBeforeScheduling: Array<unknown> = [];
+		const input: DispatchInput = {
+			dispatchId: 'dispatch-durable',
+			targetAgent: 'moderator',
+			agent: 'moderator',
+			id: 'guild:1',
+			session: 'case:1',
+			input: { type: 'durable' },
+			acceptedAt: '2026-05-21T00:00:00.000Z',
+		};
+
+		const receipt = await persistAgentDispatchAdmission({
+			input,
+			createContext: createTestContext,
+			runStore,
+		});
+		storedBeforeScheduling.push(await runStore.getRun('dispatch-durable'));
+
+		expect(receipt).toEqual({ dispatchId: 'dispatch-durable', acceptedAt: '2026-05-21T00:00:00.000Z' });
+		expect(storedBeforeScheduling[0]).toMatchObject({
+			runId: 'dispatch-durable',
+			owner: { kind: 'agent', agentName: 'moderator', instanceId: 'guild:1' },
+			payload: input,
+			status: 'active',
+		});
+	});
+
+	it('returns the existing receipt for an identical durable admission replay and rejects conflicts', async () => {
+		const runStore = new InMemoryRunStore();
+		const input: DispatchInput = {
+			dispatchId: 'dispatch-replay',
+			targetAgent: 'moderator',
+			agent: 'moderator',
+			id: 'guild:1',
+			session: 'case:1',
+			input: { text: 'one' },
+			acceptedAt: '2026-05-21T00:00:00.000Z',
+		};
+		const options = { createContext: createTestContext, runStore };
+		await persistAgentDispatchAdmission({ ...options, input });
+		await expect(persistAgentDispatchAdmission({ ...options, input })).resolves.toEqual({ dispatchId: input.dispatchId, acceptedAt: input.acceptedAt });
+		await expect(persistAgentDispatchAdmission({ ...options, input: { ...input, input: { text: 'changed' } } })).rejects.toThrow('conflicts with an existing dispatch id');
+	});
+
 	it('connects global dispatch through the Node queue to target session processing', async () => {
 		const processed: DispatchInput[] = [];
 		const sessions: string[] = [];
@@ -518,31 +574,64 @@ describe('external delivery fan-out', () => {
 		});
 	});
 
+	it('persists dispatched input once and reuses it during recovery', async () => {
+		const store = new InMemorySessionStore();
+		const harness = new Harness('guild:1', 'default', testAgentConfig(), fakeEnv(), store);
+		const session = await harness.session('case:1');
+		const agent = Reflect.get(session, 'harness') as {
+			state: { messages: AgentMessage[] };
+			continue: () => Promise<void>;
+			waitForIdle: () => Promise<void>;
+		};
+		let continuations = 0;
+		agent.continue = async () => {
+			continuations += 1;
+			agent.state.messages.push({
+				role: 'assistant',
+				content: [{ type: 'text', text: 'processed' }],
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				timestamp: Date.now(),
+			} as AgentMessage);
+		};
+		agent.waitForIdle = async () => {};
+		const input: DispatchInput = {
+			dispatchId: 'dispatch-persisted',
+			targetAgent: 'moderator',
+			agent: 'moderator',
+			id: 'guild:1',
+			session: 'case:1',
+			input: { type: 'flagged' },
+			acceptedAt: '2026-05-21T00:00:00.000Z',
+		};
+		const dispatched = session as FlueSession & { processDispatchInput(input: DispatchInput): PromiseLike<unknown> };
+
+		await dispatched.processDispatchInput(input);
+		await dispatched.processDispatchInput(input);
+
+		const data = await store.load('agent-session:["guild:1","default","case:1"]');
+		expect(continuations).toBe(1);
+		expect(data?.entries.filter((entry) => entry.type === 'message' && entry.message.role === 'user')).toHaveLength(1);
+		expect(data?.entries[0]).toMatchObject({ source: 'dispatch', dispatch: { dispatchId: 'dispatch-persisted' } });
+	});
+
 	it('renders dispatched input deterministically and preserves structured metadata', async () => {
 		const store = new InMemorySessionStore();
 		const harness = new Harness('guild:1', 'default', testAgentConfig(), fakeEnv(), store);
 		const session = await harness.session('case:1');
 		const agent = Reflect.get(session, 'harness') as {
 			state: { messages: AgentMessage[] };
-			prompt: (text: string) => Promise<void>;
+			continue: () => Promise<void>;
 			waitForIdle: () => Promise<void>;
 		};
-		agent.prompt = async (text: string) => {
+		agent.continue = async () => {
 			agent.state.messages.push(
-				{
-					role: 'assistant',
-					content: [{ type: 'text', text: 'synthetic preface' }],
-					usage: {
-						input: 0,
-						output: 0,
-						cacheRead: 0,
-						cacheWrite: 0,
-						totalTokens: 0,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-					},
-					timestamp: Date.now(),
-				} as AgentMessage,
-				{ role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() } as AgentMessage,
 				{
 					role: 'assistant',
 					content: [{ type: 'text', text: 'processed' }],
@@ -574,7 +663,6 @@ describe('external delivery fan-out', () => {
 
 		const data = await store.load('agent-session:["guild:1","default","case:1"]');
 		const dispatchEntry = data?.entries.find((entry) => entry.type === 'message' && entry.message.role === 'user');
-		expect(data?.entries[0]).not.toHaveProperty('dispatch');
 		expect(dispatchEntry).toMatchObject({
 			type: 'message',
 			source: 'dispatch',

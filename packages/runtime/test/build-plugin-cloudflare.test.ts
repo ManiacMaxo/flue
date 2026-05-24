@@ -3,13 +3,27 @@ import { CloudflarePlugin } from '../../cli/src/lib/build-plugin-cloudflare.ts';
 import type { BuildContext } from '../../cli/src/lib/types.ts';
 
 describe('Cloudflare build plugin', () => {
-	it('fails external-channel dispatch processing clearly instead of using memory fallback', async () => {
+	it('forwards dispatch admissions to the target agent Durable Object', async () => {
 		const entry = await new CloudflarePlugin().generateEntryPoint(testBuildContext());
 
-		expect(entry).toContain('Cloudflare external-channel dispatch processing is not supported yet');
-		expect(entry).toContain('Dispatch must route to the target agent Durable Object');
+		expect(entry).toContain("const INTERNAL_DISPATCH_PATH = '/__flue/internal/dispatch';");
+		expect(entry).toContain('const createdAgents = {};');
+		expect(entry).toContain('const dispatchAgentNames = new Map();');
+		expect(entry).toContain('dispatchAgentNames.set(mod.default, name);');
+		expect(entry).toContain('async enqueue(input) {');
+		expect(entry).toContain('getAgentByName(binding, input.id)');
+		expect(entry).toContain('if (isInternalDispatchRequest(request)) {');
+		expect(entry).toContain('persistAgentDispatchAdmission({');
+		expect(entry).toContain("doInstance.startFiber('flue:dispatch'");
+		expect(entry).toContain("const idempotencyKey = 'flue:dispatch:' + input.dispatchId;");
+		expect(entry).toContain('const prior = await doInstance.inspectFiberByKey(idempotencyKey);');
+		expect(entry).toContain('processManagedAgentDispatch(input, doInstance, agentName, fiberCtx.id)');
+		expect(entry).toContain('waitForEarlierManagedDispatch(doInstance, input, fiberId)');
+		expect(entry).toContain('assertNoPendingDispatchForDirectSession(doInstance, agentName, session)');
+		expect(entry).toContain("if (ctx.name === 'flue:dispatch') return handleFlueDispatchRecovered");
+		expect(entry).toContain('resolveDispatchAgentName: (agent) => dispatchAgentNames.get(agent),');
+		expect(entry).not.toContain('Cloudflare external-channel dispatch processing is not supported yet');
 		expect(entry).not.toContain('createAgentDispatchProcessor');
-		expect(entry).not.toContain('createContextForRequest(id, runId, payload, undefined, req)');
 	});
 
 	it('threads generated Durable Object identity through Cloudflare context', async () => {
@@ -47,7 +61,7 @@ describe('Cloudflare build plugin', () => {
 		expect(entry).not.toContain('recoverWebhookRun');
 		expect(entry).toContain("runId = decodeURIComponent(segments[1] || '');");
 		expect(entry).toContain('createContext: (id_, runId, payload, req, initialEventIndex)');
-		expect(entry).not.toContain("assertAgentsDurabilityApi(doInstance, 'startFiber');");
+		expect(entry).toContain("assertAgentsDurabilityApi(doInstance, 'startFiber');");
 	});
 
 	it('generates exclusive hibernating WebSocket handling inside owning Durable Objects', async () => {

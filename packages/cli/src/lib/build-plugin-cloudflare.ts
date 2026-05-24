@@ -191,7 +191,10 @@ import {
   handleAgentRequest,
   handleWorkflowRequest,
   handleRunRouteRequest,
+  persistAgentDispatchAdmission,
+  createDispatchAgentHandler,
   recoverAgentRun,
+  reserveDispatchAgentSession,
   reserveRecoveredAgentSession,
   failRecoveredRun,
   generateWorkflowRunId,
@@ -199,7 +202,6 @@ import {
   createDefaultFlueApp,
   createDirectAgentHandler,
   hasRegisteredProvider,
-  InMemoryDispatchQueue,
 } from '@flue/runtime/internal';
 import {
   runWithCloudflareContext,
@@ -243,6 +245,8 @@ const systemPrompt = '';
 function normalizeBuiltModules(agentModules, workflowModules) {
   const manifest = { agents: [], workflows: [] };
   const directHandlers = {};
+  const createdAgents = {};
+  const dispatchAgentNames = new Map();
   const websocketAgentHandlers = {};
   const receiveHandlers = {};
   const agentRouteMiddleware = {};
@@ -264,6 +268,10 @@ function normalizeBuiltModules(agentModules, workflowModules) {
       throw new Error('[flue] Agent "' + name + '" exports receive(...) but no channels.');
     }
     manifest.agents.push({ name, channels, receive: typeof mod.receive === 'function', created: true });
+    createdAgents[name] = mod.default;
+    const previousDispatchName = dispatchAgentNames.get(mod.default);
+    if (previousDispatchName !== undefined) throw new Error('[flue] Agents "' + previousDispatchName + '" and "' + name + '" default-export the same created agent value. Use distinct createAgent(...) values for dispatchable agent modules.');
+    dispatchAgentNames.set(mod.default, name);
     if (channels.http) directHandlers[name] = createDirectAgentHandler(mod.default);
     if (channels.websocket) websocketAgentHandlers[name] = createDirectAgentHandler(mod.default);
     if (typeof mod.route === 'function') agentRouteMiddleware[name] = mod.route;
@@ -292,7 +300,7 @@ function normalizeBuiltModules(agentModules, workflowModules) {
     if (typeof mod.websocket === 'function') workflowWebSocketMiddleware[name] = mod.websocket;
   }
 
-  return { manifest, directHandlers, websocketAgentHandlers, receiveHandlers, workflowHandlers, websocketWorkflowHandlers, agentRouteMiddleware, agentWebSocketMiddleware, workflowRouteMiddleware, workflowWebSocketMiddleware };
+  return { manifest, directHandlers, createdAgents, dispatchAgentNames, websocketAgentHandlers, receiveHandlers, workflowHandlers, websocketWorkflowHandlers, agentRouteMiddleware, agentWebSocketMiddleware, workflowRouteMiddleware, workflowWebSocketMiddleware };
 }
 
 function normalizeChannelList(value, label) {
@@ -321,7 +329,7 @@ const workflowModules = {
 ${workflowModuleEntries}
 };
 const normalized = normalizeBuiltModules(agentModules, workflowModules);
-const { manifest, directHandlers, websocketAgentHandlers, receiveHandlers, workflowHandlers, websocketWorkflowHandlers, agentRouteMiddleware, agentWebSocketMiddleware, workflowRouteMiddleware, workflowWebSocketMiddleware } = normalized;
+const { manifest, directHandlers, createdAgents, dispatchAgentNames, websocketAgentHandlers, receiveHandlers, workflowHandlers, websocketWorkflowHandlers, agentRouteMiddleware, agentWebSocketMiddleware, workflowRouteMiddleware, workflowWebSocketMiddleware } = normalized;
 const agentClassNames = {
 ${agentClassMapEntries}
 };
@@ -384,14 +392,21 @@ function resolveSandbox(sandbox) {
 // Fallback in-memory store (used if no DO storage is available).
 const memoryStore = new InMemorySessionStore();
 const memoryRunStore = new InMemoryRunStore();
-const dispatchQueue = new InMemoryDispatchQueue({
-  process() {
-    throw new Error(
-      '[flue] Cloudflare external-channel dispatch processing is not supported yet. ' +
-      'Dispatch must route to the target agent Durable Object before it can process session input.'
-    );
+const INTERNAL_DISPATCH_PATH = '/__flue/internal/dispatch';
+const dispatchQueue = {
+  async enqueue(input) {
+    const binding = env?.[agentBindingNameFromAgentName(input.targetAgent)];
+    if (!binding) throw new Error('[flue] dispatch() target agent "' + input.targetAgent + '" Durable Object binding is unavailable.');
+    const stub = await getAgentByName(binding, input.id);
+    const response = await stub.fetch(new Request('https://flue.invalid' + INTERNAL_DISPATCH_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    }));
+    if (!response.ok) throw new Error('[flue] dispatch() target agent "' + input.targetAgent + '" rejected durable admission with status ' + response.status + '.');
+    return response.json();
   },
-});
+};
 
 // Module-scoped per-isolate registry; run ids isolate buckets across DOs.
 const runSubscribers = createRunSubscriberRegistry();
@@ -449,6 +464,11 @@ function createRunStoreForRequest(doInstance) {
     : memoryRunStore;
 }
 
+function createDurableDispatchRunStore(doInstance) {
+  if (!doInstance?.ctx?.storage?.sql) throw new Error('[flue] Durable dispatch admission requires target Durable Object SQL storage.');
+  return createDurableRunStore(doInstance.ctx.storage.sql);
+}
+
 function createRunRegistryForRequest(reqEnv) {
   return createCloudflareRunRegistry(reqEnv?.FLUE_REGISTRY);
 }
@@ -502,6 +522,7 @@ function assertAgentsDurabilityApi(doInstance, method) {
 }
 
 async function handleFlueFiberRecovered(ctx, doInstance, agentName) {
+  if (ctx.name === 'flue:dispatch') return handleFlueDispatchRecovered(ctx, doInstance, agentName);
   if (!ctx.name || !ctx.name.startsWith('flue:webhook:')) return;
   const runId = ctx.name.slice('flue:webhook:'.length);
   const runStore = createRunStoreForRequest(doInstance);
@@ -593,6 +614,17 @@ async function handleFlueFiberRecovered(ctx, doInstance, agentName) {
   }
 }
 
+async function handleFlueDispatchRecovered(ctx, doInstance, agentName) {
+  const input = ctx.metadata?.input;
+  if (!input || input.targetAgent !== agentName || input.id !== doInstance.name) return { status: 'error', error: 'Dispatch recovery metadata is invalid.' };
+  try {
+    await processManagedAgentDispatch(input, doInstance, agentName, ctx.id);
+    return { status: 'completed' };
+  } catch (error) {
+    return { status: 'error', error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function handleFlueWorkflowFiberRecovered(ctx, doInstance, workflowName) {
   if (!ctx.name || ctx.name !== 'flue:workflow:' + doInstance.name) return;
   const interruptedRunId = doInstance.name;
@@ -649,6 +681,62 @@ async function handleFlueWorkflowFiberRecovered(ctx, doInstance, workflowName) {
 
 // ─── Per-DO Dispatch ───────────────────────────────────────────────────────
 
+async function waitForEarlierManagedDispatch(doInstance, input, fiberId) {
+  if (typeof doInstance.listFibers !== 'function') return;
+  while (true) {
+    const fibers = await doInstance.listFibers({ name: 'flue:dispatch' });
+    const current = fibers.find((fiber) => fiber.id === fiberId);
+    if (!current) return;
+    const blocked = fibers.some((fiber) => {
+      if (fiber.id === fiberId || fiber.status === 'completed' || fiber.status === 'error' || fiber.status === 'aborted') return false;
+      const other = fiber.metadata?.input;
+      if (!other || other.targetAgent !== input.targetAgent || other.id !== input.id || other.session !== input.session) return false;
+      return fiber.createdAt < current.createdAt || (fiber.createdAt === current.createdAt && fiber.id < fiberId);
+    });
+    if (!blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function processManagedAgentDispatch(input, doInstance, agentName, fiberId) {
+  const agent = createdAgents[agentName];
+  if (!agent) throw new Error('[flue] Dispatch target unavailable during durable processing.');
+  const runStore = createDurableDispatchRunStore(doInstance);
+  await persistAgentDispatchAdmission({
+    input,
+    runStore,
+    runSubscribers,
+    runRegistry: createRunRegistryForRequest(doInstance.env),
+    createContext: (id_, runId, payload, req, initialEventIndex) => createContextForRequest(id_, runId, payload, doInstance, req, initialEventIndex),
+  });
+  const owner = { kind: 'agent', agentName, instanceId: doInstance.name };
+  await waitForEarlierManagedDispatch(doInstance, input, fiberId);
+  const releaseSessionLock = await reserveDispatchAgentSession(owner, input);
+  const result = await runWithInstanceContext(doInstance, agentRuntimeIdentity(agentName), () => recoverAgentRun({
+    label: agentName,
+    owner,
+    id: doInstance.name,
+    runId: input.dispatchId,
+    handler: createDispatchAgentHandler(agent, input),
+    payload: input,
+    request: new Request('https://flue.invalid' + INTERNAL_DISPATCH_PATH, { method: 'POST' }),
+    releaseSessionLock,
+    runStore,
+    runSubscribers,
+    runRegistry: createRunRegistryForRequest(doInstance.env),
+    createContext: (id_, runId, payload, req, initialEventIndex) => createContextForRequest(id_, runId, payload, doInstance, req, initialEventIndex),
+  }));
+  if (result.isError) throw result.error;
+}
+
+async function assertNoPendingDispatchForDirectSession(doInstance, agentName, session) {
+  if (typeof doInstance.listFibers !== 'function') return;
+  const fibers = await doInstance.listFibers({ name: 'flue:dispatch' });
+  if (fibers.some((fiber) => fiber.status !== 'completed' && fiber.status !== 'error' && fiber.status !== 'aborted' && fiber.metadata?.input?.targetAgent === agentName && fiber.metadata?.input?.id === doInstance.name && fiber.metadata?.input?.session === session)) {
+    throw new Error('[flue] This agent session has pending dispatched input and cannot accept direct input yet.');
+  }
+}
+
 async function dispatchWorkflow(request, doInstance, workflowName) {
   // The DO room name is the workflow instance id. For workflows that
   // equals the run id (one run per instance), so callers reach this DO
@@ -694,6 +782,23 @@ async function dispatchWorkflow(request, doInstance, workflowName) {
 
 async function dispatchAgent(request, doInstance, agentName, handler) {
   const id = doInstance.name; // DO room name set by routeAgentRequest
+  if (isInternalDispatchRequest(request)) {
+    const input = await request.json();
+    if (input.targetAgent !== agentName || input.agent !== agentName || input.id !== id) return new Response('Invalid internal dispatch target.', { status: 400 });
+    if (!createdAgents[agentName]) return new Response('Dispatch target unavailable.', { status: 404 });
+    assertAgentsDurabilityApi(doInstance, 'startFiber');
+    assertAgentsDurabilityApi(doInstance, 'inspectFiberByKey');
+    const idempotencyKey = 'flue:dispatch:' + input.dispatchId;
+    const prior = await doInstance.inspectFiberByKey(idempotencyKey);
+    if (prior?.metadata?.input && JSON.stringify(prior.metadata.input) !== JSON.stringify(input)) {
+      return new Response('Conflicting internal dispatch replay.', { status: 409 });
+    }
+    await doInstance.startFiber('flue:dispatch', async (fiberCtx) => processManagedAgentDispatch(input, doInstance, agentName, fiberCtx.id), {
+      idempotencyKey,
+      metadata: { input },
+    });
+    return Response.json({ dispatchId: input.dispatchId, acceptedAt: input.acceptedAt });
+  }
   const runRoute = parseRunRoute(request);
   if (runRoute) {
     return handleRunRouteRequest({
@@ -705,6 +810,9 @@ async function dispatchAgent(request, doInstance, agentName, handler) {
     });
   }
 
+  const payload = await request.clone().json().catch(() => null);
+  const session = typeof payload?.session === 'string' && payload.session.trim() !== '' ? payload.session : 'default';
+  await assertNoPendingDispatchForDirectSession(doInstance, agentName, session);
   const identity = agentRuntimeIdentity(agentName);
   return runWithInstanceContext(doInstance, identity, () => handleAgentRequest({
       request,
@@ -775,6 +883,7 @@ async function messageAgentSocket(connection, message, doInstance, agentName) {
     id: doInstance.name,
     request: socketRequest(connection),
     handler,
+    beforePrompt: (session) => assertNoPendingDispatchForDirectSession(doInstance, agentName, session),
     runStore: createRunStoreForRequest(doInstance),
     runSubscribers,
     runRegistry: createRunRegistryForRequest(doInstance.env),
@@ -832,6 +941,10 @@ function agentRuntimeIdentity(agentName) {
   };
 }
 
+function isInternalDispatchRequest(request) {
+  return request.method === 'POST' && new URL(request.url).pathname === INTERNAL_DISPATCH_PATH;
+}
+
 function parseWorkflowStart(request, workflowName) {
   if (request.method !== 'POST') return false;
   const url = new URL(request.url);
@@ -881,6 +994,7 @@ configureFlueRuntime({
   handlers: directHandlers,
   receiveHandlers,
   dispatchQueue,
+  resolveDispatchAgentName: (agent) => dispatchAgentNames.get(agent),
   workflowHandlers,
   agentRouteMiddleware,
   agentWebSocketMiddleware,

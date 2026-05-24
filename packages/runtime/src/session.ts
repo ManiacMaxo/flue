@@ -305,6 +305,12 @@ export class SessionHistory {
 		);
 	}
 
+	findDispatchInput(dispatchId: string): MessageEntry | undefined {
+		return this.getActivePath().find(
+			(entry): entry is MessageEntry => entry.type === 'message' && entry.dispatch?.dispatchId === dispatchId,
+		);
+	}
+
 	appendMessages(messages: AgentMessage[], source?: MessageSource, dispatch?: DispatchMessageMetadata): string[] {
 		let dispatchAttached = false;
 		return messages.map((message) => {
@@ -650,21 +656,7 @@ export class Session implements FlueSession {
 
 	processDispatchInput(input: DispatchInput): CallHandle<PromptResponse> {
 		return createCallHandle(undefined, (signal) =>
-			this.runOperation('prompt', signal, async () =>
-				this.runPromptCall({
-					promptText: renderDispatchInput(input),
-					schema: undefined,
-					tools: undefined,
-					model: undefined,
-					thinkingLevel: undefined,
-					images: undefined,
-					source: 'dispatch',
-					dispatch: dispatchMetadata(input),
-					errorLabel: `dispatch(${input.dispatchId})`,
-					callSite: 'this dispatched input',
-					signal,
-				}) as Promise<PromptResponse>,
-			),
+			this.runOperation('prompt', signal, () => this.runPersistedDispatchInput(input)),
 		);
 	}
 
@@ -1648,30 +1640,66 @@ export class Session implements FlueSession {
 	}
 
 	private async runPersistedDirectInput(input: { runId: string; message: string }): Promise<PromptResponse> {
+		return this.runPersistedContextInput({
+			findInput: () => this.history.findDirectInput(input.runId),
+			persistInput: () => this.history.appendMessage(
+				createUserContextMessage(input.message, new Date().toISOString()),
+				'prompt',
+				undefined,
+				{ runId: input.runId },
+			),
+			errorLabel: 'prompt',
+			outputSource: 'prompt',
+			callSite: 'this direct input',
+			persistenceError: '[flue] Failed to persist direct agent input.',
+			recoveryError: '[flue] Cannot recover direct agent input after the session has advanced.',
+		});
+	}
+
+	private async runPersistedDispatchInput(input: DispatchInput): Promise<PromptResponse> {
+		return this.runPersistedContextInput({
+			findInput: () => this.history.findDispatchInput(input.dispatchId),
+			persistInput: () => this.history.appendMessage(
+				createUserContextMessage(renderDispatchInput(input), new Date().toISOString()),
+				'dispatch',
+				dispatchMetadata(input),
+			),
+			errorLabel: `dispatch(${input.dispatchId})`,
+			outputSource: 'dispatch',
+			callSite: 'this dispatched input',
+			persistenceError: '[flue] Failed to persist dispatched input.',
+			recoveryError: '[flue] Cannot recover dispatched input after the session has advanced.',
+		});
+	}
+
+	private async runPersistedContextInput(options: {
+		findInput: () => MessageEntry | undefined;
+		persistInput: () => string;
+		errorLabel: string;
+		outputSource: MessageSource;
+		callSite: string;
+		persistenceError: string;
+		recoveryError: string;
+	}): Promise<PromptResponse> {
 		return this.withScopedRuntime(
 			{
 				tools: [],
 				model: undefined,
 				thinkingLevel: undefined,
-				callSite: 'this direct input',
+				callSite: options.callSite,
 			},
 			async ({ resolvedModel }) => {
-				let inputEntry = this.history.findDirectInput(input.runId);
+				let inputEntry = options.findInput();
 				if (!inputEntry) {
-					this.history.appendMessage(
-						createUserContextMessage(input.message, new Date().toISOString()),
-						'prompt',
-						undefined,
-						{ runId: input.runId },
-					);
+					options.persistInput();
 					this.harness.state.messages = this.history.buildContext();
 					await this.save();
-					inputEntry = this.history.findDirectInput(input.runId);
+					inputEntry = options.findInput();
 				}
-				if (!inputEntry) throw new Error('[flue] Failed to persist direct agent input.');
+				if (!inputEntry) throw new Error(options.persistenceError);
 				const following = this.history.getActivePathSince(inputEntry.id);
 				if (following.some((entry) => entry.type === 'message' && entry.message.role === 'user')) {
-					throw new Error('[flue] Cannot recover direct agent input after the session has advanced.');
+					throw new Error(options.recoveryError);
 				}
 				const persistedAssistant = [...following].reverse().find(
 					(entry): entry is MessageEntry => entry.type === 'message' && entry.message.role === 'assistant',
@@ -1680,13 +1708,13 @@ export class Session implements FlueSession {
 					const beforeLength = this.harness.state.messages.length;
 					await this.harness.continue();
 					await this.harness.waitForIdle();
-					await this.syncHarnessMessagesSince(beforeLength, 'prompt');
+					await this.syncHarnessMessagesSince(beforeLength, options.outputSource);
 					await this.checkLatestAssistantForCompaction();
-					this.throwIfError('prompt');
+					this.throwIfError(options.errorLabel);
 				} else {
 					const assistant = persistedAssistant.message as AssistantMessage;
 					if (assistant.stopReason === 'error' || assistant.stopReason === 'aborted') {
-						throw new Error(`[flue] prompt failed: ${assistant.errorMessage ?? assistant.stopReason}`);
+						throw new Error(`[flue] ${options.errorLabel} failed: ${assistant.errorMessage ?? assistant.stopReason}`);
 					}
 				}
 				return {
@@ -1716,11 +1744,6 @@ export class Session implements FlueSession {
 		errorLabel: string;
 		callSite: string;
 		signal: AbortSignal;
-		// The result-schema branch returns the public `PromptResultResponse<unknown>`
-		// shape (`data` + `usage` + `model`) plus a deprecated `result` alias
-		// that the public type marks as `never`. We widen the internal return
-		// type with `Omit<…, 'result'> & { result: unknown }` so the runtime
-		// can populate the alias without TS rejecting the assignment.
 	}): Promise<
 		| PromptResponse
 		| (Omit<PromptResultResponse<unknown>, 'result'> & { result: unknown })
@@ -1736,13 +1759,6 @@ export class Session implements FlueSession {
 				extraTools: resultBundle?.tools,
 			},
 			async ({ resolvedModel }) => {
-				// Two snapshots, two purposes:
-				//   - `beforeLength` indexes the volatile flat-message array and is
-				//     used by `syncHarnessMessagesSince` to copy newly produced
-				//     harness messages into the durable history tree.
-				//   - `beforeLeafId` anchors a window in that durable tree and is
-				//     used by `aggregateUsageSince` to sum usage across exactly the
-				//     entries this call appended (including any compaction entry).
 				const beforeLength = this.harness.state.messages.length;
 				const beforeLeafId = this.history.getLeafId();
 				const model: PromptModel = { id: resolvedModel.id };
@@ -1757,10 +1773,6 @@ export class Session implements FlueSession {
 						args.signal,
 						args.images,
 					);
-					// `result` is the deprecated alias for `data`. Both keys carry
-					// the same value during the deprecation window so existing
-					// callers keep working at runtime; the public type marks
-					// `result` as `never` so TypeScript flags new usage.
 					return {
 						data: result,
 						result,

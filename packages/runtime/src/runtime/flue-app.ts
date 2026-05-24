@@ -184,9 +184,6 @@ export async function dispatch(
 				'This usually means it was used outside a Flue-built server entry.',
 		);
 	}
-	if (rt.target === 'cloudflare') {
-		throw new Error('[flue] dispatch() is not supported on Cloudflare until target agent Durable Object forwarding is configured.');
-	}
 	if (!rt.dispatchQueue) {
 		throw new Error('[flue] dispatch() cannot be accepted because no dispatch queue is configured.');
 	}

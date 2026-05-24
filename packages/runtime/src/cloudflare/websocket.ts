@@ -36,6 +36,7 @@ export interface CloudflareAgentWebSocketOptions extends CloudflareAttachedOptio
 	name: string;
 	id: string;
 	handler: AgentHandler;
+	beforePrompt?: (session: string) => void | Promise<void>;
 }
 
 export interface CloudflareWorkflowWebSocketOptions extends CloudflareAttachedOptions {
@@ -89,6 +90,7 @@ export async function messageCloudflareAgentWebSocket(
 		send(connection, { version: 1, type: 'pong', requestId: message.requestId });
 		return;
 	}
+	await options.beforePrompt?.(message.session ?? 'default');
 	await invokeAgentPrompt(connection, message, options);
 }
 

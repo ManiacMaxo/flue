@@ -2,7 +2,7 @@
 
 import type { FlueContextInternal } from '../client.ts';
 import { InvalidRequestError, parseJsonBody, RunEventTooLargeError, toHttpResponse } from '../errors.ts';
-import type { CreatedAgent, DirectAgentPayload, FlueEvent, FlueEventCallback } from '../types.ts';
+import type { CreatedAgent, DirectAgentPayload, DispatchReceipt, FlueEvent, FlueEventCallback } from '../types.ts';
 import type { DispatchInput, DispatchProcessor } from './dispatch-queue.ts';
 import { generateRunId, generateWorkflowRunId } from './ids.ts';
 import type { RunOwner, RunRegistry } from './run-registry.ts';
@@ -33,28 +33,99 @@ export function createAgentDispatchProcessor(options: {
 		async process(input) {
 			const agent = options.agents[input.targetAgent];
 			if (!agent) throw new Error(`[flue] dispatch target agent "${input.targetAgent}" has no created agent.`);
-			const runId = generateRunId();
 			const lifecycle = await createRunLifecycle({
-				owner: { kind: 'agent', agentName: input.targetAgent, instanceId: input.id },
+				owner: dispatchOwner(input),
 				id: input.id,
-				runId,
+				runId: generateRunId(),
 				payload: input,
-				request: new Request('http://flue.local/_dispatch', { method: 'POST' }),
+				request: dispatchRequest(),
 				createContext: options.createContext,
 				runStore: options.runStore,
 				runSubscribers: options.runSubscribers,
 				runRegistry: options.runRegistry,
 			});
-			await withRunLifecycle(lifecycle, async () => {
-				const harness = await lifecycle.ctx.initializeCreatedAgent(agent, undefined);
-				const session = await harness.session(input.session);
-				if (!isDispatchSession(session)) {
-					throw new Error('[flue] Internal session does not support dispatch input processing.');
-				}
-				await session.processDispatchInput(input);
-			});
+			await withRunLifecycle(lifecycle, () => createDispatchAgentHandler(agent, input)(lifecycle.ctx));
 		},
 	};
+}
+
+export interface PersistAgentDispatchAdmissionOptions {
+	input: DispatchInput;
+	createContext: CreateContextFn;
+	runStore?: RunStore;
+	runSubscribers?: RunSubscriberRegistry;
+	runRegistry?: RunRegistry;
+}
+
+export async function persistAgentDispatchAdmission(options: PersistAgentDispatchAdmissionOptions): Promise<DispatchReceipt> {
+	const { input, createContext, runStore, runSubscribers, runRegistry } = options;
+	if (!isDispatchInput(input)) throw new Error('[flue] Internal dispatch admission received an invalid payload.');
+	if (!runStore) throw new Error('[flue] Durable dispatch admission requires a target Durable Object run store.');
+	const owner = dispatchOwner(input);
+	const existing = await runStore.getRun(input.dispatchId);
+	if (existing) {
+		if (!sameDispatchAdmission(existing.owner, existing.payload, owner, input)) {
+			throw new Error('[flue] Internal dispatch admission conflicts with an existing dispatch id.');
+		}
+		return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+	}
+	await createRunLifecycle({
+		owner,
+		id: input.id,
+		runId: input.dispatchId,
+		payload: input,
+		request: dispatchRequest(),
+		createContext,
+		runStore,
+		runSubscribers,
+		runRegistry,
+		requireDurableAdmission: true,
+	});
+	return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+}
+
+export function createDispatchAgentHandler(agent: CreatedAgentHandler, input: DispatchInput): AgentHandler {
+	return (ctx) => processAgentDispatch(ctx, agent, input);
+}
+
+export async function reserveDispatchAgentSession(
+	owner: Extract<RunOwner, { kind: 'agent' }>,
+	payload: unknown,
+): Promise<() => void> {
+	return waitForAgentSessionLock(owner, payload);
+}
+
+async function processAgentDispatch(ctx: FlueContextInternal, agent: CreatedAgentHandler, input: DispatchInput): Promise<unknown> {
+	const harness = await ctx.initializeCreatedAgent(agent, undefined);
+	const session = await harness.session(input.session);
+	if (!isDispatchSession(session)) {
+		throw new Error('[flue] Internal session does not support dispatch input processing.');
+	}
+	return session.processDispatchInput(input);
+}
+
+function dispatchOwner(input: DispatchInput): Extract<RunOwner, { kind: 'agent' }> {
+	return { kind: 'agent', agentName: input.targetAgent, instanceId: input.id };
+}
+
+function sameDispatchAdmission(existingOwner: RunOwner, existingPayload: unknown, owner: RunOwner, input: DispatchInput): boolean {
+	return JSON.stringify(existingOwner) === JSON.stringify(owner) && JSON.stringify(existingPayload) === JSON.stringify(input);
+}
+
+function isDispatchInput(value: unknown): value is DispatchInput {
+	if (!value || typeof value !== 'object') return false;
+	const input = value as Partial<DispatchInput>;
+	return typeof input.dispatchId === 'string' && input.dispatchId.trim() !== ''
+		&& typeof input.targetAgent === 'string' && input.targetAgent.trim() !== ''
+		&& input.agent === input.targetAgent
+		&& typeof input.id === 'string' && input.id.trim() !== ''
+		&& typeof input.session === 'string' && input.session.trim() !== ''
+		&& input.input !== undefined
+		&& typeof input.acceptedAt === 'string' && input.acceptedAt.trim() !== '';
+}
+
+function dispatchRequest(): Request {
+	return new Request('http://flue.local/_dispatch', { method: 'POST' });
 }
 
 function isDispatchSession(value: unknown): value is DispatchSession {
@@ -435,6 +506,17 @@ export function reserveRecoveredAgentSession(
 	payload: unknown,
 ): (() => void) | undefined {
 	return acquireAgentSessionLock({ owner, payload });
+}
+
+async function waitForAgentSessionLock(owner: Extract<RunOwner, { kind: 'agent' }>, payload: unknown): Promise<() => void> {
+	while (true) {
+		try {
+			return acquireAgentSessionLock({ owner, payload }) ?? (() => {});
+		} catch (error) {
+			if (!(error instanceof InvalidRequestError) || error.details !== 'This agent session already has an active prompt.') throw error;
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		}
+	}
 }
 
 interface WebhookOptions {
@@ -829,6 +911,7 @@ interface RunLifecycleOptions {
 	runRegistry?: RunRegistry;
 	restartedFromRunId?: string;
 	restartedAsRunId?: string;
+	requireDurableAdmission?: boolean;
 }
 
 interface RunLifecycle extends RunLifecycleOptions {
@@ -843,8 +926,11 @@ async function createRunLifecycle(options: RunLifecycleOptions): Promise<RunLife
 	const ctx = options.createContext(options.id, options.runId, options.payload, options.request);
 	const runStore = options.runStore;
 	const owner = options.owner;
+	if (options.requireDurableAdmission && !runStore) {
+		throw new Error('[flue] Durable dispatch admission requires a target Durable Object run store.');
+	}
 	const didCreateRun = runStore
-		? await safeRunStore('createRun', () =>
+		? await persistRunAdmission('createRun', options.requireDurableAdmission === true, () =>
 			runStore.createRun({
 				runId: options.runId,
 				owner,
@@ -1030,14 +1116,19 @@ async function persistRunEvent(label: string, fn: () => Promise<void> | undefine
 	}
 }
 
-async function safeRunStore(label: string, fn: () => Promise<void> | undefined): Promise<boolean> {
+async function persistRunAdmission(label: string, required: boolean, fn: () => Promise<void> | undefined): Promise<boolean> {
 	try {
 		await fn();
 		return true;
 	} catch (error) {
 		console.error(`[flue:run-store] ${label} failed:`, error);
+		if (required) throw error;
 		return false;
 	}
+}
+
+async function safeRunStore(label: string, fn: () => Promise<void> | undefined): Promise<boolean> {
+	return persistRunAdmission(label, false, fn);
 }
 
 async function safeRegistry(label: string, fn: () => Promise<void> | undefined): Promise<void> {

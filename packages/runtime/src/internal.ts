@@ -72,13 +72,16 @@ export type {
 //
 // The user-facing `flue()` itself is re-exported from `@flue/runtime/app`, not here.
 export {
+	persistAgentDispatchAdmission,
 	createAgentDispatchProcessor,
+	createDispatchAgentHandler,
 	createDirectAgentHandler,
 	failRecoveredRun,
 	handleAgentRequest,
 	handleWorkflowRequest,
 	invokeAttached,
 	recoverAgentRun,
+	reserveDispatchAgentSession,
 	reserveRecoveredAgentSession,
 } from './runtime/handle-agent.ts';
 export { generateRunId, generateWorkflowRunId, parseWorkflowRunId } from './runtime/ids.ts';
