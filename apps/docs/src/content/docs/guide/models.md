@@ -201,9 +201,3 @@ export default app;
 ```
 
 Set `gateway: false` in that registration when you do not want Flue to pass a gateway option. See Cloudflare's [Workers bindings documentation](https://developers.cloudflare.com/ai-gateway/integrations/worker-binding-methods/) for gateway behavior and supported options.
-
-### Reasoning effort
-
-For reasoning-capable Workers AI models, Flue passes `thinkingLevel` through the binding as Cloudflare's shared `reasoning_effort` option. Workers AI exposes `low`, `medium`, and `high`, so Flue maps `'minimal'` to `low` and `'xhigh'` to `high`.
-
-Cloudflare also documents model-specific thinking switches for some models. Flue does not translate those individual switches: `thinkingLevel: 'off'` makes no additional reasoning-effort request, but it may not disable reasoning that a selected Workers AI model enables by default.
