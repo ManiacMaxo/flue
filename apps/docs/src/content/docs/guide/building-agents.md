@@ -204,7 +204,7 @@ Use `dispatch(...)` when your application receives an event for an agent asynchr
 
 ```ts title="src/app.ts"
 import { dispatch } from '@flue/runtime';
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import supportAssistant from './agents/support-assistant.ts';
 import { verifySupportWebhook } from './shared/support-webhooks.ts';

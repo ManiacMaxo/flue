@@ -81,8 +81,9 @@ export {
 // succeeded.
 throw new Error(
 	'[@flue/sdk] This subpath has moved. The package previously published at "@flue/sdk" was renamed: ' +
-		'runtime APIs now live in "@flue/runtime" (e.g. "@flue/sdk/client", "@flue/sdk/sandbox", "@flue/sdk/app", ' +
-		'"@flue/sdk/node", "@flue/sdk/cloudflare", "@flue/sdk/internal" → "@flue/runtime"), and ' +
-		'build/config helpers moved to "@flue/cli" (e.g. "@flue/sdk/config" → "@flue/cli/config"). ' +
-		'See the changelog: https://github.com/withastro/flue/blob/main/CHANGELOG.md',
+		'general runtime APIs, including provider and observation APIs, now live in "@flue/runtime"; authored application ' +
+		'routing APIs now live in "@flue/runtime/routing"; Cloudflare runtime APIs and binding types live in ' +
+		'"@flue/runtime/cloudflare"; Node and internal APIs retain matching "@flue/runtime/node" and ' +
+		'"@flue/runtime/internal" subpaths; and build/config helpers moved to "@flue/cli" (e.g. "@flue/sdk/config" → ' +
+		'"@flue/cli/config"). See the changelog: https://github.com/withastro/flue/blob/main/CHANGELOG.md',
 );

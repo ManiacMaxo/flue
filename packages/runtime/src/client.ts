@@ -76,7 +76,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 			}
 		}
 		// Fan out to module-scoped subscribers registered via
-		// `observe()` from `@flue/runtime/app`. These run after the
+		// `observe()` from `@flue/runtime`. These run after the
 		// per-context subscribers and receive the originating `ctx` as
 		// a second argument so cross-cutting code (error reporting,
 		// log forwarding) can read `ctx.id`, `ctx.payload`, etc.

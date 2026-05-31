@@ -19,7 +19,7 @@ The integration is entirely in [`src/app.ts`](src/app.ts). Workflows do not impo
 The bridge intentionally uses only Braintrust's public logger/span APIs and Flue's public events:
 
 ```ts
-import { observe } from '@flue/runtime/app';
+import { observe } from '@flue/runtime';
 import { initLogger } from 'braintrust';
 
 const logger = process.env.BRAINTRUST_API_KEY

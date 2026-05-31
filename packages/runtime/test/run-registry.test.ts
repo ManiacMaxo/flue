@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { admin, flue, observe } from '../src/app.ts';
 import { createAgent } from '../src/agent-definition.ts';
+import { observe } from '../src/index.ts';
+import { admin, flue } from '../src/routing.ts';
 import {
 	configureFlueRuntime,
 	createFlueContext,

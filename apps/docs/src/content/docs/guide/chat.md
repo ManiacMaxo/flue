@@ -20,7 +20,7 @@ For example, an application using its own platform integration can accept a mess
 
 ```ts title="src/app.ts"
 import { dispatch } from '@flue/runtime';
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import assistant from './agents/assistant.ts';
 import { parseVerifiedChatMessage } from './chat/platform.ts';
@@ -92,7 +92,7 @@ export function connectChat(agent: CreatedAgent) {
 Mount the adapter webhook route in the same application boundary:
 
 ```ts title="src/app.ts"
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import assistant from './agents/assistant.ts';
 import { bot, connectChat } from './chat.ts';

@@ -83,11 +83,11 @@ and others. Events emitted in that workflow run carry its correlation tree
 consumer can reconstruct what happened. See [Observability](../../apps/docs/src/content/docs/guide/observability.md)
 for the vendor-neutral event contract and its sensitive-content guidance.
 
-The `@flue/runtime/app` package exposes a single function for tapping that
+The `@flue/runtime` package exposes a single function for tapping that
 stream globally:
 
 ```ts
-import { observe } from '@flue/runtime/app';
+import { observe } from '@flue/runtime';
 
 observe((event, ctx) => {
   // event is a fully decorated FlueEvent

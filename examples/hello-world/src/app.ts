@@ -1,5 +1,6 @@
 /** Example `app.ts`: compose a custom Hono app and runtime providers. */
-import { configureProvider, flue, registerProvider } from '@flue/runtime/app';
+import { configureProvider, registerProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 // Brand-new provider IDs for local OpenAI-compatible servers.
@@ -37,7 +38,7 @@ app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() })
 // Mount Flue's built-in agent route.
 app.route('/', flue());
 
-// To expose admin endpoints, import `admin` from `@flue/runtime/app`, then
+// To expose admin endpoints, import `admin` from `@flue/runtime/routing`, then
 // uncomment this and add your own auth middleware first:
 // app.use('/admin/*', myAuthMiddleware);
 // app.route('/admin', admin());

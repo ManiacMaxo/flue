@@ -81,13 +81,22 @@ export { createTools, BUILTIN_TOOL_NAMES } from './agent.ts';
 export { defineTool } from './tool.ts';
 export { createAgent, defineAgentProfile } from './agent-definition.ts';
 export { dispatch } from './runtime/flue-app.ts';
+export { type FlueEventSubscriber, observe } from './runtime/events.ts';
+export {
+	configureProvider,
+	type HttpProviderRegistration,
+	type ProviderConfiguration,
+	type ProviderRegistration,
+	registerApiProvider,
+	registerProvider,
+} from './runtime/providers.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
 export { ResultUnavailableError } from './result.ts';
 export { createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 
 // Note: the public Hono sub-app `flue()` and the `Fetchable` interface
-// for user-authored `app.ts` entries live at `@flue/runtime/app`, not on
+// for user-authored `app.ts` entries live at `@flue/runtime/routing`, not on
 // the root barrel.
 //
 // Note: createFlueContext, InMemorySessionStore, bashFactoryToSessionEnv, and the

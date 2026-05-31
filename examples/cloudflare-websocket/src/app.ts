@@ -1,4 +1,4 @@
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono, type MiddlewareHandler } from 'hono';
 
 const authorizeSocket: MiddlewareHandler = async (c, next) => {

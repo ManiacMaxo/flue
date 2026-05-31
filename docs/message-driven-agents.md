@@ -106,7 +106,7 @@ Use a custom `app.ts` or integration module for provider webhooks and other even
 
 ```ts
 import { Hono } from 'hono';
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { dispatch } from '@flue/runtime';
 import triage from './agents/triage.ts';
 

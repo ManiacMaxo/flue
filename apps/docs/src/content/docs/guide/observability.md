@@ -51,7 +51,8 @@ pnpm exec flue logs <runId> --server http://localhost:3583
 Register `observe(...)` in your application entrypoint when you need telemetry across workflows and continuing agents. The observer receives activity handled by that running application context, including operations triggered by asynchronously dispatched input.
 
 ```ts title="src/app.ts"
-import { flue, observe } from '@flue/runtime/app';
+import { observe } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 observe((event) => {
@@ -86,7 +87,8 @@ If your application already uses OpenTelemetry, register Flue's observer adapter
 
 ```ts title="src/app.ts"
 import { createOpenTelemetryObserver } from '@flue/opentelemetry';
-import { flue, observe } from '@flue/runtime/app';
+import { observe } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 observe(createOpenTelemetryObserver());

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { flue } from '../src/app.ts';
+import { flue } from '../src/routing.ts';
 import {
 	configureFlueRuntime,
 	createDirectAgentHandler,

@@ -1,45 +1,17 @@
-/**
- * Runtime-safe application composition APIs for an optional authored `app.ts`
- * entrypoint.
- *
- * Without `app.ts`, Flue generates an application that mounts {@link flue} at
- * `/`. When `app.ts` exists, its default {@link Fetchable} export owns the
- * request pipeline and must mount {@link flue} explicitly to publish Flue
- * routes. Mount {@link admin} explicitly when the application needs protected
- * deployment inspection routes.
- *
- * ```ts
- * import { flue } from '@flue/runtime/app';
- * import { Hono } from 'hono';
- *
- * const app = new Hono();
- * app.route('/', flue());
- * export default app;
- * ```
- */
-export { admin } from './runtime/admin-app.ts';
-export { type FlueEventSubscriber, observe } from './runtime/events.ts';
-export { flue } from './runtime/flue-app.ts';
-export {
-	type CloudflareAIBinding,
-	type CloudflareAIBindingRegistration,
-	configureProvider,
-	type HttpProviderRegistration,
-	type ProviderConfiguration,
-	type ProviderRegistration,
-	registerApiProvider,
-	registerProvider,
-} from './runtime/providers.ts';
+export type { CloudflareAIBinding, CloudflareAIBindingRegistration } from './cloudflare/index.ts';
+export type { FlueEventSubscriber } from './runtime/events.ts';
+export type { HttpProviderRegistration, ProviderConfiguration, ProviderRegistration } from './runtime/providers.ts';
+export type { Fetchable } from './routing.ts';
 
-/**
- * Structural contract for the default export of an authored `app.ts` entry.
- * Any object exposing a compatible `fetch()` method satisfies it, including a
- * `new Hono()` instance.
- *
- * On Cloudflare, `env` contains bindings and `ctx` is the
- * `ExecutionContext`. On Node, `env` contains Hono's Node adapter bindings for
- * the incoming and outgoing messages, and `ctx` is `undefined`.
- */
-export interface Fetchable {
-	fetch(request: Request, env?: unknown, ctx?: unknown): Response | Promise<Response>;
+function migrationError(helper: string, entrypoint: '@flue/runtime' | '@flue/runtime/routing'): never {
+	throw new Error(`[flue] ${helper}() is no longer available from "@flue/runtime/app". Import it from "${entrypoint}" instead.`);
 }
+
+export const admin: typeof import('./routing.ts').admin = () => migrationError('admin', '@flue/runtime/routing');
+export const flue: typeof import('./routing.ts').flue = () => migrationError('flue', '@flue/runtime/routing');
+export const configureProvider: typeof import('./index.ts').configureProvider = () => migrationError('configureProvider', '@flue/runtime');
+export const registerApiProvider: typeof import('./index.ts').registerApiProvider = () => migrationError('registerApiProvider', '@flue/runtime');
+export const registerProvider: typeof import('./index.ts').registerProvider = () => migrationError('registerProvider', '@flue/runtime');
+export const observe: typeof import('./runtime/events.ts').observe = () => {
+	throw new Error('[flue] observe() is no longer available from "@flue/runtime/app". Import it from "@flue/runtime" instead.');
+};

@@ -1,6 +1,6 @@
 import { completeSimple, registerApiProvider } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
-import { registerProvider } from '../src/app.ts';
+import { registerProvider } from '../src/index.ts';
 import { getCloudflareAIBindingApiProvider } from '../src/cloudflare/workers-ai-provider.ts';
 import { resolveModel } from '../src/internal.ts';
 

@@ -227,7 +227,7 @@ describe('Node build plugin', () => {
 			path.join(root, 'app.ts'),
 			`import { Hono } from 'hono';\n` +
 				`import { dispatch } from '@flue/runtime';\n` +
-				`import { flue } from '@flue/runtime/app';\n` +
+				`import { flue } from '@flue/runtime/routing';\n` +
 				`import assistant from './agents/assistant.ts';\n` +
 				`const app = new Hono();\n` +
 				`app.post('/enqueue', async (c) => c.json(await dispatch(assistant, { id: 'thread-1', input: { text: 'hello' } })));\n` +
@@ -389,7 +389,7 @@ describe('Node build plugin', () => {
 		);
 		fs.writeFileSync(
 			path.join(root, 'app.ts'),
-			`import { flue } from '@flue/runtime/app';\n` +
+			`import { flue } from '@flue/runtime/routing';\n` +
 				`import { Hono } from 'hono';\n` +
 				`const app = new Hono();\n` +
 				`app.use('/api/agents/*', async (c, next) => { if (c.req.query('token') !== 'ok') return c.text('Unauthorized', 401); await next(); });\n` +

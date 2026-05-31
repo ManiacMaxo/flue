@@ -1,5 +1,4 @@
-import type { FlueEvent } from '@flue/runtime';
-import type { FlueEventSubscriber } from '@flue/runtime/app';
+import type { FlueEvent, FlueEventSubscriber } from '@flue/runtime';
 import { context, SpanKind, SpanStatusCode, trace, type Attributes, type Context, type Span, type Tracer } from '@opentelemetry/api';
 
 export interface OpenTelemetryObserverOptions {

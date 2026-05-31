@@ -1,7 +1,7 @@
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall, registerFauxProvider, Type } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import { createAgent } from '../src/agent-definition.ts';
-import { observe } from '../src/app.ts';
+import { observe } from '../src/index.ts';
 import { createFlueContext, InMemorySessionStore, type DispatchInput } from '../src/internal.ts';
 import type { FlueEvent, FlueSession, SessionEnv } from '../src/types.ts';
 

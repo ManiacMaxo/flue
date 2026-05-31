@@ -4,6 +4,7 @@ export default defineConfig({
 	entry: [
 		'src/index.ts',
 		'src/app.ts',
+		'src/routing.ts',
 		'src/client-compat.ts',
 		'src/sandbox-compat.ts',
 		'src/internal.ts',

@@ -13,7 +13,7 @@ It is an ordinary [Hono](https://hono.dev/) application, so you can compose Flue
 Without `src/app.ts`, Flue generates an application that mounts its public routes at `/`. When you add `src/app.ts`, export a Hono application and mount `flue()` explicitly:
 
 ```ts title="src/app.ts"
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { authenticate } from './auth.ts';
 
@@ -51,7 +51,7 @@ A custom application can serve any route your service needs. It can also accept 
 
 ```ts title="src/app.ts"
 import { dispatch } from '@flue/runtime';
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import supportAssistant from './agents/support-assistant.ts';
 import { parseVerifiedSupportComment } from './support-webhooks.ts';
@@ -85,7 +85,7 @@ Here, the webhook route belongs to your application: it determines which request
 For most applications, mount Flue at the root with `app.route('/', flue())`. You can instead mount it beneath a prefix when Flue is one part of a larger API:
 
 ```ts title="src/app.ts"
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 const app = new Hono();

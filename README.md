@@ -315,7 +315,8 @@ They apply to every harness and session that resolves models through that provid
 
 ```ts
 // .flue/app.ts
-import { configureProvider, flue } from '@flue/runtime/app';
+import { configureProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 
 export default {
   fetch(req, env, ctx) {

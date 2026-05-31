@@ -8,7 +8,8 @@ Configure your OpenTelemetry SDK and exporter in your application, then register
 
 ```ts
 import { createOpenTelemetryObserver } from '@flue/opentelemetry';
-import { flue, observe } from '@flue/runtime/app';
+import { observe } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 observe(createOpenTelemetryObserver());

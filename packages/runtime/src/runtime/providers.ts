@@ -14,7 +14,7 @@ import type { ProviderSettings } from '../types.ts';
 // ─── Public types ───────────────────────────────────────────────────────────
 
 /**
- * Minimal Workers AI binding shape. Kept structural so `@flue/runtime/app` stays
+ * Minimal Workers AI binding shape. Kept structural so `@flue/runtime` stays
  * importable on Node.
  */
 export interface CloudflareAIBinding {
@@ -156,7 +156,7 @@ const providerSettingsById = new Map<string, ProviderSettings>();
  * resolved Model metadata (cost, context window, token limits, etc.).
  *
  * ```ts
- * import { configureProvider } from '@flue/runtime/app';
+ * import { configureProvider } from '@flue/runtime';
  *
  * configureProvider('anthropic', {
  *   baseUrl: 'https://gateway.example.com/anthropic',

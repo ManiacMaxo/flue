@@ -385,7 +385,7 @@ export interface CompactionConfig {
 
 // ─── Provider Runtime Settings ──────────────────────────────────────────────
 
-/** Per-provider transport settings configured from `@flue/runtime/app`. */
+/** Per-provider transport settings configured from `@flue/runtime`. */
 export interface ProviderSettings {
 	/** Provider endpoint used by built-in models or registered providers. */
 	baseUrl?: string;
@@ -1024,8 +1024,8 @@ export type LlmTurnPurpose = 'agent' | 'compaction' | 'compaction_prefix';
  * calls use generated ids.
  *
  * Workflow history persists this union where run-store persistence succeeds.
- * Attached-agent streams and {@link observe} deliver live activity; they are
- * not durable workflow history.
+ * Attached-agent streams and `observe()` from `@flue/runtime` deliver live
+ * activity; they are not durable workflow history.
  */
 export type FlueEvent = (
 	| {

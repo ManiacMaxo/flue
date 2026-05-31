@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { registerProvider, configureProvider } from '../src/app.ts';
+import { configureProvider, registerProvider } from '../src/index.ts';
 import { resolveModel } from '../src/internal.ts';
 
 describe('model provider identity', () => {

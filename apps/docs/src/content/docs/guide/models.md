@@ -96,7 +96,8 @@ Cloudflare provides several ways to reach models from a Flue application. Choose
 Use `configureProvider(...)` in `src/app.ts` when a built-in provider should retain its known model catalog but send requests through application-specific transport configuration, such as an AI gateway or proxy.
 
 ```ts title="src/app.ts"
-import { configureProvider, flue } from '@flue/runtime/app';
+import { configureProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 if (process.env.ANTHROPIC_GATEWAY_URL) {
@@ -121,7 +122,8 @@ Use `registerProvider(...)` in `src/app.ts` when you want to connect Flue to a m
 For example, you can register a local Ollama server through its OpenAI-compatible endpoint:
 
 ```ts title="src/app.ts"
-import { flue, registerProvider } from '@flue/runtime/app';
+import { registerProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 registerProvider('ollama', {
@@ -145,7 +147,7 @@ export default createAgent(() => ({
 }));
 ```
 
-A provider registration can also supply authentication, headers, and model metadata when your endpoint requires them. Most OpenAI-compatible services can use the built-in `openai-completions` protocol shown above. For an endpoint with a different wire protocol, advanced integrations can register that protocol with `registerApiProvider(...)` before registering a provider ID for it.
+A provider registration can also supply authentication, headers, and model metadata when your endpoint requires them. Most OpenAI-compatible services can use the built-in `openai-completions` protocol shown above. For an endpoint with a different wire protocol, advanced integrations can import `registerApiProvider(...)` from `@flue/runtime` and use it to register that protocol before registering a provider ID for it.
 
 Choose a new provider ID unless you intend to replace a built-in connection path. For example, registering `cloudflare` yourself replaces Flue's generated `cloudflare/...` binding configuration, which is how the customization below takes effect.
 
@@ -180,7 +182,8 @@ By default, Flue routes `cloudflare/...` binding calls through Cloudflare AI Gat
 
 ```ts title="src/app.ts"
 import { env } from 'cloudflare:workers';
-import { flue, registerProvider } from '@flue/runtime/app';
+import { registerProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 registerProvider('cloudflare', {

@@ -71,7 +71,7 @@ export type {
 //     keeps user projects from needing it as a direct dep when they
 //     don't author their own `app.ts`).
 //
-// The user-facing `flue()` itself is re-exported from `@flue/runtime/app`, not here.
+// The user-facing `flue()` itself is re-exported from `@flue/runtime/routing`, not here.
 export {
 	validateAgentDispatchAdmission,
 	createAgentDispatchProcessor,

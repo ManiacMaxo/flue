@@ -4,7 +4,7 @@ description: Reference runtime activity, attached-agent streams, WebSocket messa
 lastReviewedAt: 2026-05-30
 ---
 
-Observable runtime types are exported from `@flue/runtime`. Global observation APIs are exported from `@flue/runtime/app`.
+Observable runtime types and global observation APIs are exported from `@flue/runtime`.
 
 ```ts
 import {
@@ -18,8 +18,9 @@ import {
   type WebSocketServerMessage,
   type WorkflowWebSocketClientMessage,
   type WorkflowWebSocketServerMessage,
+  observe,
+  type FlueEventSubscriber,
 } from '@flue/runtime';
-import { observe, type FlueEventSubscriber } from '@flue/runtime/app';
 ```
 
 ## Runtime events

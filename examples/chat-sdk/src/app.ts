@@ -1,4 +1,5 @@
-import { flue, registerProvider } from '@flue/runtime/app';
+import { registerProvider } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import assistant from './agents/assistant.ts';
 import { bot, registerChatHandlers } from './chat.ts';

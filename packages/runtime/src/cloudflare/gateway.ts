@@ -3,9 +3,9 @@
  * `env.AI.run(...)`. Mirrors the shape documented at
  * https://developers.cloudflare.com/ai-gateway/integrations/worker-binding-methods/.
  *
- * Carried on a `CloudflareAIBindingRegistration` from `app.ts`; the binding
- * provider attaches it to every `env.AI.run(...)` call routed through that
- * registration.
+ * Carried on a `CloudflareAIBindingRegistration` from
+ * `@flue/runtime/cloudflare`; the binding provider attaches it to every
+ * `env.AI.run(...)` call routed through that registration.
  */
 export interface CloudflareGatewayOptions {
 	/**

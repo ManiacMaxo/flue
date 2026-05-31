@@ -1,5 +1,5 @@
-import type { FlueEvent } from '@flue/runtime';
-import { flue, observe } from '@flue/runtime/app';
+import { observe, type FlueEvent } from '@flue/runtime';
+import { flue } from '@flue/runtime/routing';
 import { initLogger, type Span } from 'braintrust';
 import { Hono } from 'hono';
 

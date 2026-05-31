@@ -49,7 +49,7 @@ Work on one page at a time. Read:
 Identify the page's intended import path or configuration root. Examples:
 
 - `@flue/runtime`
-- `@flue/runtime/app`
+- `@flue/runtime/routing`
 - `@flue/runtime/node`
 - `@flue/runtime/cloudflare`
 - `@flue/cli/config`
@@ -192,7 +192,7 @@ Use editorial grouping only where it improves lookup. Good grouping examples:
 
 - configuration fields under one authored config interface;
 - agents, profiles, harnesses, sessions, and session operations on one Agent API page;
-- application composition functions under `@flue/runtime/app`;
+- application composition functions under `@flue/runtime/routing`;
 - observable event unions and errors on an Events Reference page.
 
 Avoid introducing a separate manifest during the initial pass. For now:

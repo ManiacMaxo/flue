@@ -4,14 +4,14 @@ description: Compose Flue routes in an authored application entrypoint.
 lastReviewedAt: 2026-05-30
 ---
 
-Import application composition APIs from `@flue/runtime/app`.
+Import application composition APIs from `@flue/runtime/routing`.
 
 ## `app.ts`
 
 `app.ts` is an optional authored application entrypoint. Without it, Flue generates an application that mounts `flue()` at `/`. When `app.ts` exists, its default export owns the request pipeline and must mount `flue()` explicitly to publish Flue routes.
 
 ```ts title="src/app.ts"
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 const app = new Hono();
@@ -63,7 +63,7 @@ function admin(): Hono;
 Creates a mountable Hono sub-app for read-only deployment inspection. Mount it explicitly beneath an application-chosen prefix and protect that mount with application-owned authorization.
 
 ```ts title="src/app.ts"
-import { admin, flue } from '@flue/runtime/app';
+import { admin, flue } from '@flue/runtime/routing';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { authenticateOperator } from './auth.ts';
 

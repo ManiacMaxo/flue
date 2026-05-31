@@ -214,7 +214,7 @@ import {
   messageCloudflareAgentWebSocket,
   messageCloudflareWorkflowWebSocket,
 } from '@flue/runtime/cloudflare';
-import { registerApiProvider, registerProvider } from '@flue/runtime/app';
+import { registerApiProvider, registerProvider } from '@flue/runtime';
 
 ${agentImports}
 ${workflowImports}
