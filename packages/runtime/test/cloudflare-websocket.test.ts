@@ -109,7 +109,6 @@ describe('Cloudflare agent WebSockets', () => {
 		expect(connection.closed).toBeUndefined();
 	});
 
-
 	it('rejects oversized messages when a Cloudflare agent socket exceeds the byte limit', async () => {
 		const connection = new TestConnection();
 		let invocations = 0;
