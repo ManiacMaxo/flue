@@ -1,7 +1,7 @@
 ---
 title: SDK API
 description: Reference for consuming deployed Flue agents and workflows with @flue/sdk.
-lastReviewedAt: 2026-05-31
+lastReviewedAt: 2026-06-02
 ---
 
 The client SDK is exported from `@flue/sdk`. Use it from applications that consume deployed Flue agents and workflows.
@@ -266,10 +266,10 @@ Admin APIs use the origin-relative read-only mount path configured with `adminBa
 ### `client.admin.agents.list()`
 
 ```ts
-list(): Promise<ListResponse<AgentManifestEntry>>;
+list(): Promise<{ items: AgentManifestEntry[] }>;
 ```
 
-Lists exposed agents and their supported transports.
+Lists all built agents and their transport metadata. This response is intentionally unpaginated.
 
 ### `client.admin.runs.list(...)`
 

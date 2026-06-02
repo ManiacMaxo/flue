@@ -74,8 +74,8 @@ export interface FlueClient {
 	/** Read-only APIs exposed by the configured admin mount path. */
 	admin: {
 		agents: {
-			/** Lists exposed agents and their supported transports. */
-			list(): Promise<ListResponse<AgentManifestEntry>>;
+			/** Lists all built agents and their transport metadata. */
+			list(): Promise<{ items: AgentManifestEntry[] }>;
 		};
 		runs: {
 			/** Lists workflow-run summaries. */

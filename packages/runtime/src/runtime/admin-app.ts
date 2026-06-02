@@ -108,15 +108,13 @@ function errorResponses() {
 	};
 }
 
-const listResponseDescription = 'Cursor-paginated list response.';
-
 function adminAgentsSpec() {
 	return {
 		tags: ['admin'],
 		operationId: 'adminListAgents',
 		summary: 'List built agents',
 		responses: {
-			200: jsonResponse(ListAgentsResponseSchema, listResponseDescription),
+			200: jsonResponse(ListAgentsResponseSchema, 'Unpaginated list of built agents.'),
 			...errorResponses(),
 		},
 	};
@@ -128,7 +126,7 @@ function adminRunsSpec() {
 		operationId: 'adminListRuns',
 		summary: 'List workflow runs across the deployment',
 		responses: {
-			200: jsonResponse(ListRunsResponseSchema, listResponseDescription),
+			200: jsonResponse(ListRunsResponseSchema, 'Cursor-paginated list response.'),
 			...errorResponses(),
 		},
 	};

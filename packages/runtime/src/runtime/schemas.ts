@@ -399,7 +399,6 @@ const AgentManifestEntrySchema = v.object({
 
 export const ListAgentsResponseSchema = v.object({
 	items: v.array(AgentManifestEntrySchema),
-	nextCursor: v.optional(v.string()),
 });
 
 export const ListRunsResponseSchema = v.object({

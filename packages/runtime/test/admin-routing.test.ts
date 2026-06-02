@@ -42,6 +42,7 @@ describe('admin()', () => {
 			get: {
 				responses: {
 					200: {
+						description: 'Unpaginated list of built agents.',
 						content: {
 							'application/json': {
 								schema: {
@@ -55,6 +56,10 @@ describe('admin()', () => {
 				},
 			},
 		});
+		expect(body.paths['/agents']).not.toHaveProperty('get.parameters');
+		expect(body.paths['/agents']).not.toHaveProperty(
+			'get.responses.200.content.application/json.schema.properties.nextCursor',
+		);
 		expect(body.paths['/runs']).toMatchObject({
 			get: {
 				responses: {

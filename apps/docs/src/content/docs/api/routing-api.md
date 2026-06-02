@@ -1,7 +1,7 @@
 ---
 title: Routing API
 description: Compose Flue routes in an authored application entrypoint.
-lastReviewedAt: 2026-05-30
+lastReviewedAt: 2026-06-02
 ---
 
 Import application composition APIs from `@flue/runtime/routing`.
@@ -82,9 +82,9 @@ app.route('/admin', admin());
 export default app;
 ```
 
-| Route               | Purpose                                         |
-| ------------------- | ----------------------------------------------- |
-| `GET /openapi.json` | Return the administrative OpenAPI document.     |
-| `GET /agents`       | List built agents and their transport metadata. |
-| `GET /runs`         | List workflow run summaries.                    |
-| `GET /runs/:runId`  | Retrieve a workflow run record.                 |
+| Route               | Purpose                                                                |
+| ------------------- | ---------------------------------------------------------------------- |
+| `GET /openapi.json` | Return the administrative OpenAPI document.                            |
+| `GET /agents`       | List all built agents and their transport metadata without pagination. |
+| `GET /runs`         | List workflow run summaries.                                           |
+| `GET /runs/:runId`  | Retrieve a workflow run record.                                        |
