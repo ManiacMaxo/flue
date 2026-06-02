@@ -60,6 +60,8 @@ Use `<package>/test/` for the intentional active suite and `<package>/test-legac
 
 Design tests from observable contracts, not implementation structure. Prefer the highest practical public interface: user-facing behavior for public APIs and explicit consumer-facing behavior for stable internal subsystem boundaries. Do not test private helpers directly when their behavior is already exercised through a meaningful interface.
 
+Do not add a regression test for every change. Before adding coverage, ask whether a reasonable suite designed from scratch would intentionally protect this behavior and whether the test is likely to catch a plausible future regression. Prefer tests for durable contracts and meaningful failure modes. Skip tests for incidental implementation details, rare edge cases, and fixes whose corrected form is already the natural result of the surrounding design. Every test makes a behavior harder to change before 1.0, so add one only when that constraint is valuable.
+
 Use `describe('someFunction()')` or `describe('SomeManager')` for the subject under test. Nested `describe()` blocks may name methods or narrower interface states. Name every test with the explicit `it('X when Y')` format so the expected behavior and condition are clear. A reasonable internal refactor should not require test changes unless the observable contract changes.
 
 Prefer explicit, self-contained `it()` blocks over deduplication. Copy-paste in tests is acceptable when it keeps each behavior readable in isolation and makes failures obvious. Avoid `it.each()` unless the cases are genuinely linear and remain clearer as a table. Avoid complex or nested helpers and dynamic test data flow.
