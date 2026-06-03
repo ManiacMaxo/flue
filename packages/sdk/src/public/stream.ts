@@ -31,7 +31,6 @@ export async function* streamRunEvents(
 
 	while (!options.signal?.aborted) {
 		try {
-			let sawTerminalEvent = false;
 			const headers = await http.requestHeaders(
 				{
 					accept: 'text/event-stream',
@@ -54,12 +53,9 @@ export async function* streamRunEvents(
 				if (frame.event === 'error') throw new Error(parseSseErrorMessage(frame.data));
 				const event = JSON.parse(frame.data) as FlueEvent;
 				yield event;
-				if (event.type === 'run_end') {
-					sawTerminalEvent = true;
-					return;
-				}
+				if (event.type === 'run_end') return;
 			}
-			if (sawTerminalEvent || options.signal?.aborted) return;
+			if (options.signal?.aborted) return;
 			if (attempt >= maxRetries) {
 				throw new Error('SSE stream closed before run_end.');
 			}
@@ -96,6 +92,9 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<
 		const frame = parseFrame(buffer);
 		if (frame) yield frame;
 	} finally {
+		try {
+			await reader.cancel();
+		} catch {}
 		reader.releaseLock();
 	}
 }

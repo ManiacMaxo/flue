@@ -354,6 +354,31 @@ describe('createFlueClient', () => {
 		}
 	});
 
+	it('cancels the workflow-run SSE response when iteration stops before run_end', async () => {
+		let cancellations = 0;
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async () =>
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode('event: run_start\nid: 1\ndata: {"type":"run_start"}\n\n'));
+						},
+						cancel() {
+							cancellations++;
+						},
+					}),
+					{
+						headers: { 'content-type': 'text/event-stream' },
+					},
+				),
+		});
+
+		for await (const _event of client.runs.stream('run_1')) break;
+
+		expect(cancellations).toBe(1);
+	});
+
 	it('reconnects run streams after clean EOF before run_end', async () => {
 		const requests: Request[] = [];
 		const client = createFlueClient({
