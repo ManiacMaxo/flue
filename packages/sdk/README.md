@@ -63,3 +63,13 @@ Build agents that can safely take action, maintain continuity, and connect to th
 - **[GitLab CI/CD](https://flueframework.com/docs/ecosystem/deploy/gitlab-ci/)**
 - **[Daytona](https://flueframework.com/docs/ecosystem/sandboxes/daytona/)**
 - **[Render](https://flueframework.com/docs/ecosystem/deploy/render/)**
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| [`@flue/runtime`](packages/runtime) | Runtime: harness, sessions, tools, sandbox |
+| [`@flue/cli`](packages/cli) | CLI and build/dev tooling (`flue` binary) |
+| [`@flue/sdk`](packages/sdk) | Client SDK for consuming deployed agents and workflows |
+| [`@flue/opentelemetry`](packages/opentelemetry) | OpenTelemetry tracing adapter |
+| [`@flue/postgres`](packages/postgres) | Postgres persistence adapter |
