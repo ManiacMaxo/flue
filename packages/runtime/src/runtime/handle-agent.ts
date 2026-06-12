@@ -207,8 +207,6 @@ export interface InvokeWorkflowAttachedOptions {
 	payload: unknown;
 	request: Request;
 	createContext: CreateContextFn;
-	startWorkflowAdmission?: StartWorkflowAdmissionFn;
-	onAdmitted?: (runId: string) => void;
 	onEvent?: FlueEventCallback;
 	runStore?: RunStore;
 	runRegistry?: RunRegistry;
@@ -251,8 +249,6 @@ interface WorkflowAdmissionOptions {
 	runStore?: RunStore;
 	runRegistry?: RunRegistry;
 	eventStreamStore: EventStreamStore;
-	onAdmitted?: (runId: string) => void;
-	onEvent?: FlueEventCallback;
 }
 
 interface AdmittedWorkflowExecution {
@@ -261,8 +257,6 @@ interface AdmittedWorkflowExecution {
 	lifecycle: WorkflowRunLifecycle;
 	startWorkflowAdmission: StartWorkflowAdmissionFn;
 	handler: WorkflowHandler;
-	onAdmitted?: (runId: string) => void;
-	onEvent?: FlueEventCallback;
 	completion?: Promise<unknown>;
 }
 
@@ -281,8 +275,6 @@ async function prepareWorkflowExecution(
 		runStore,
 		runRegistry,
 		eventStreamStore,
-		onAdmitted,
-		onEvent,
 	} = opts;
 	if (!runStore) throw new RunStoreUnavailableError();
 	const lifecycle = await createWorkflowRunLifecycle({
@@ -303,34 +295,23 @@ async function prepareWorkflowExecution(
 		lifecycle,
 		startWorkflowAdmission,
 		handler,
-		onAdmitted,
-		onEvent,
 	};
 }
 
 function startWorkflowExecution(execution: AdmittedWorkflowExecution): Promise<unknown> {
 	if (execution.completion) return execution.completion;
-	const { runId, lifecycle, handler, startWorkflowAdmission, onEvent } = execution;
+	const { runId, lifecycle, handler, startWorkflowAdmission } = execution;
 	let didRun = false;
-	if (onEvent) {
-		lifecycle.ctx.setEventCallback(onEvent);
-	}
 	const run = async (): Promise<unknown> => {
 		didRun = true;
-		try {
-			return await withWorkflowRunLifecycle(lifecycle, async () => {
-				execution.onAdmitted?.(runId);
-				return await handler(lifecycle.ctx);
-			});
-		} finally {
-			lifecycle.ctx.setEventCallback(undefined);
-		}
+		return await withWorkflowRunLifecycle(lifecycle, async () => {
+			return await handler(lifecycle.ctx);
+		});
 	};
 	let scheduled: Promise<unknown>;
 	try {
 		scheduled = startWorkflowAdmission(runId, run);
 	} catch (error) {
-		lifecycle.ctx.setEventCallback(undefined);
 		execution.completion = emitRunEnd(lifecycle, { isError: true, error }).then(() =>
 			Promise.reject(error),
 		);
@@ -340,7 +321,6 @@ function startWorkflowExecution(execution: AdmittedWorkflowExecution): Promise<u
 	execution.completion = scheduled.catch(async (error) => {
 		if (!didRun) {
 			await emitRunEnd(lifecycle, { isError: true, error });
-			lifecycle.ctx.setEventCallback(undefined);
 		}
 		throw error;
 	});
@@ -507,35 +487,6 @@ async function runSyncMode(execution: AdmittedWorkflowExecution): Promise<Respon
 }
 
 export async function invokeWorkflowAttached(
-	opts: InvokeWorkflowAttachedOptions,
-): Promise<WorkflowAttachedInvocationResult> {
-	if (!opts.startWorkflowAdmission) return invokeWorkflowAttachedUnlocked(opts);
-	const execution = await prepareWorkflowExecution({
-		workflowName: opts.workflowName,
-		id: opts.id,
-		runId: opts.runId,
-		handler: opts.handler,
-		payload: opts.payload,
-		request: opts.request,
-		createContext: opts.createContext,
-		startWorkflowAdmission: opts.startWorkflowAdmission,
-		runStore: opts.runStore,
-		runRegistry: opts.runRegistry,
-		eventStreamStore: opts.eventStreamStore,
-		onAdmitted: opts.onAdmitted,
-		onEvent: opts.onEvent,
-	});
-	let result: unknown;
-	try {
-		result = await startWorkflowExecution(execution);
-	} catch (error) {
-		await execution.completion?.catch(() => undefined);
-		throw error;
-	}
-	return { runId: opts.runId, result };
-}
-
-async function invokeWorkflowAttachedUnlocked(
 	opts: InvokeWorkflowAttachedOptions,
 ): Promise<WorkflowAttachedInvocationResult> {
 	const lifecycle = await createWorkflowRunLifecycle({
