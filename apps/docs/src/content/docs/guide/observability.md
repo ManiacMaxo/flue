@@ -36,7 +36,7 @@ export async function run({ init, log, payload }: FlueContext<{ text: string }>)
 }
 ```
 
-`log.info(...)`, `log.warn(...)`, and `log.error(...)` accept structured attributes. Use attributes for values that you may later search, aggregate, or forward to a monitoring system.
+`log.info(...)`, `log.warn(...)`, and `log.error(...)` accept structured attributes. Use attributes for values that you may later search, aggregate, or forward to a monitoring system. See [`ctx.log`](/docs/api/agent-api/#ctxlog) in the Agent API for the `FlueLogger` signatures.
 
 When a workflow invoked through a running application reports its `runId`, use that identifier to inspect the workflow run from the command line:
 

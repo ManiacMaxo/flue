@@ -31,7 +31,7 @@ In this example:
 
 - **The filename:** This gives the workflow its name: `summarize`.
 - `createAgent(...)`: This defines the agent used to perform the work.
-- `run(...)`: This is the unit of work Flue runs for each invocation.
+- `run(...)`: This is the unit of work Flue runs for each invocation. It receives the workflow's [`FlueContext`](/docs/api/agent-api/#fluecontext), which also carries `id`, `env`, `req`, and `log`.
 - `init(summarizer)`: This initializes the created agent for this workflow invocation and returns its harness.
 - `harness.session()`: This opens the default session used for the operation.
 - **The return value:** This becomes the completed workflow result.
