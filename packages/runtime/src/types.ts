@@ -176,6 +176,7 @@ export interface SessionEnv {
 
 	readFile(path: string): Promise<string>;
 	readFileBuffer(path: string): Promise<Uint8Array>;
+	/** Creates missing parent directories (the `FlueFs.writeFile` guarantee). */
 	writeFile(path: string, content: string | Uint8Array): Promise<void>;
 	stat(path: string): Promise<FileStat>;
 	readdir(path: string): Promise<string[]>;
@@ -220,6 +221,11 @@ export interface FlueFs {
 	/**
 	 * Write content to a file. Creates the file if it doesn't exist; replaces
 	 * it if it does. Accepts both UTF-8 strings and raw bytes.
+	 *
+	 * Missing parent directories are created automatically, in every sandbox
+	 * mode — `fs.writeFile('out/nested/report.md', ...)` never requires a
+	 * prior `mkdir`. The runtime implements this guarantee itself, so sandbox
+	 * connectors don't need to create parents in their `writeFile`.
 	 */
 	writeFile(path: string, content: string | Uint8Array): Promise<void>;
 

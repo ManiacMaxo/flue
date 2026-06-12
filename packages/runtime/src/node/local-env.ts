@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { abortErrorFor } from '../abort.ts';
+import { writeFileCreatingParents } from '../sandbox.ts';
 import type { FileStat, SessionEnv, ShellResult } from '../types.ts';
 
 /** Cap on captured stdout+stderr (matches the old `exec` maxBuffer lift). */
@@ -276,13 +277,13 @@ export function createLocalSessionEnv(options: LocalSessionEnvOptions = {}): Ses
 
 		async writeFile(p, content) {
 			const resolved = resolvePath(p);
-			// Auto-create parent directory, matching the BashFactory adapter's
-			// behavior so users get consistent semantics across sandbox modes.
-			const dir = path.dirname(resolved);
-			if (dir && dir !== resolved) {
-				await fs.mkdir(dir, { recursive: true });
-			}
-			await fs.writeFile(resolved, content);
+			// FlueFs.writeFile guarantees parents are created as needed in
+			// every sandbox mode; the shared lazy implementation keeps the
+			// happy path at a single fs call.
+			await writeFileCreatingParents(
+				() => fs.writeFile(resolved, content),
+				() => fs.mkdir(path.dirname(resolved), { recursive: true }),
+			);
 		},
 
 		async stat(p): Promise<FileStat> {

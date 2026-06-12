@@ -126,12 +126,9 @@ function createWriteTool(env: SessionEnv): AgentTool<typeof WriteParams> {
 		parameters: WriteParams,
 		async execute(_toolCallId: string, params: Static<typeof WriteParams>, signal?: AbortSignal) {
 			throwIfAborted(signal);
-			const resolved = env.resolvePath(params.path);
-			const dir = resolved.replace(/\/[^/]*$/, '');
-			if (dir && dir !== resolved) {
-				await env.mkdir(dir, { recursive: true });
-			}
-			await env.writeFile(resolved, params.content);
+			// SessionEnv.writeFile creates missing parent directories itself
+			// (the FlueFs.writeFile guarantee), so no eager mkdir here.
+			await env.writeFile(params.path, params.content);
 			return {
 				content: [
 					{

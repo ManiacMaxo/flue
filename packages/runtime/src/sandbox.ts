@@ -22,6 +22,41 @@ export function createFlueFs(env: SessionEnv): FlueFs {
 	};
 }
 
+/**
+ * Shared implementation of the `FlueFs.writeFile` parent-creation guarantee.
+ * Every `SessionEnv` adapter (local, bash factory, SandboxApi wrapper) routes
+ * writes through here so the cross-mode contract has exactly one
+ * implementation.
+ *
+ * Lazy by design: try the write first so the happy path costs a single call
+ * (no extra remote round-trip per write). When the write fails — most often a
+ * missing parent directory — `mkdir -p` the parent and retry once. Mkdir
+ * errors are ignored so that when the original failure was something else
+ * entirely, the retry reproduces it and its error propagates unchanged.
+ */
+export async function writeFileCreatingParents(
+	write: () => Promise<void>,
+	mkdirParent: () => Promise<unknown>,
+): Promise<void> {
+	try {
+		await write();
+		return;
+	} catch {
+		// Fall through to parent creation + retry.
+	}
+	try {
+		await mkdirParent();
+	} catch {
+		// Ignore: the retried write's error is the authoritative failure.
+	}
+	await write();
+}
+
+/** Parent directory of an absolute POSIX path (`/a/b.txt` → `/a`, `/a.txt` → `/`). */
+function posixParentDir(p: string): string {
+	return p.replace(/\/[^/]*$/, '') || '/';
+}
+
 export function createCwdSessionEnv(parentEnv: SessionEnv, cwd: string): SessionEnv {
 	const scopedCwd = normalizePath(cwd);
 	const resolvePath = (p: string): string => {
@@ -91,17 +126,12 @@ function createBashSessionEnv(bash: BashLike): SessionEnv {
 		},
 		readFile: (p) => fs.readFile(resolve(p)),
 		readFileBuffer: (p) => fs.readFileBuffer(resolve(p)),
-		writeFile: async (p, content) => {
+		writeFile: (p, content) => {
 			const resolved = resolve(p);
-			const dir = resolved.replace(/\/[^/]*$/, '');
-			if (dir && dir !== resolved) {
-				try {
-					await fs.mkdir(dir, { recursive: true });
-				} catch {
-					/* parent already exists */
-				}
-			}
-			await fs.writeFile(resolved, content);
+			return writeFileCreatingParents(
+				() => fs.writeFile(resolved, content),
+				() => fs.mkdir(posixParentDir(resolved), { recursive: true }),
+			);
 		},
 		stat: (p) => fs.stat(resolve(p)),
 		readdir: (p) => fs.readdir(resolve(p)),
@@ -225,7 +255,11 @@ export function createSandboxSessionEnv(api: SandboxApi, cwd: string): SessionEn
 		},
 
 		async writeFile(path: string, content: string | Uint8Array): Promise<void> {
-			return api.writeFile(resolvePath(path), content);
+			const resolved = resolvePath(path);
+			return writeFileCreatingParents(
+				() => api.writeFile(resolved, content),
+				() => api.mkdir(posixParentDir(resolved), { recursive: true }),
+			);
 		},
 
 		async stat(path: string): Promise<FileStat> {

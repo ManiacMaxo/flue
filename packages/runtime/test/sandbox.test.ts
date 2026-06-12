@@ -104,6 +104,61 @@ describe('createSandboxSessionEnv()', () => {
 		expect(rm).toHaveBeenCalledWith('/shared/cache', { recursive: true, force: true });
 	});
 
+	it('writes without a mkdir round-trip when a filesystem write succeeds directly', async () => {
+		const writeFile = vi.fn(async () => {});
+		const mkdir = vi.fn(async () => {});
+		const env = createSandboxSessionEnv(
+			createSandboxApi({ writeFile, mkdir }),
+			'/workspace/project',
+		);
+
+		await env.writeFile('output/result.txt', 'done');
+
+		expect(writeFile).toHaveBeenCalledTimes(1);
+		expect(writeFile).toHaveBeenCalledWith('/workspace/project/output/result.txt', 'done');
+		expect(mkdir).not.toHaveBeenCalled();
+	});
+
+	it('creates the parent directory and retries once when a filesystem write fails', async () => {
+		const writeFile = vi
+			.fn(async () => {})
+			.mockRejectedValueOnce(new Error('ENOENT: no such file or directory'));
+		const mkdir = vi.fn(async () => {});
+		const env = createSandboxSessionEnv(
+			createSandboxApi({ writeFile, mkdir }),
+			'/workspace/project',
+		);
+
+		await env.writeFile('output/nested/result.txt', 'done');
+
+		expect(mkdir).toHaveBeenCalledWith('/workspace/project/output/nested', { recursive: true });
+		expect(writeFile).toHaveBeenCalledTimes(2);
+		expect(writeFile).toHaveBeenNthCalledWith(
+			2,
+			'/workspace/project/output/nested/result.txt',
+			'done',
+		);
+	});
+
+	it('rejects with the retried write error when a write still fails after parent creation', async () => {
+		const writeFile = vi
+			.fn<SandboxApi['writeFile']>()
+			.mockRejectedValueOnce(new Error('first failure'))
+			.mockRejectedValueOnce(new Error('disk quota exceeded'));
+		const mkdir = vi.fn(async () => {
+			throw new Error('mkdir not supported');
+		});
+		const env = createSandboxSessionEnv(
+			createSandboxApi({ writeFile, mkdir }),
+			'/workspace/project',
+		);
+
+		await expect(env.writeFile('output/result.txt', 'done')).rejects.toThrow(
+			'disk quota exceeded',
+		);
+		expect(writeFile).toHaveBeenCalledTimes(2);
+	});
+
 	it('passes command cwd env timeoutMs and signal when an adapted environment executes a command', async () => {
 		const exec = vi.fn(async () => ({ stdout: 'done', stderr: '', exitCode: 0 }));
 		const env = createSandboxSessionEnv(createSandboxApi({ exec }), '/workspace/project');
