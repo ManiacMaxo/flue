@@ -24,6 +24,7 @@ import type { DispatchInput } from '../runtime/dispatch-queue.ts';
 import type { SessionData } from '../types.ts';
 
 export { defineEventStreamStoreContractTests } from './define-event-stream-store-contract-tests.ts';
+export { defineRunStoreContractTests } from './define-run-store-contract-tests.ts';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 

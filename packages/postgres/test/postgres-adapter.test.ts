@@ -11,7 +11,11 @@ import { describe, expect, it } from 'vitest';
 import type { SessionData } from '@flue/runtime';
 import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import { postgresFromRunner, type PgRunner } from '../src/postgres-adapter.ts';
-import { defineEventStreamStoreContractTests, defineStoreContractTests } from '@flue/runtime/test-utils';
+import {
+	defineEventStreamStoreContractTests,
+	defineRunStoreContractTests,
+	defineStoreContractTests,
+} from '@flue/runtime/test-utils';
 
 // ─── PGlite → PgRunner adapter ─────────────────────────────────────────────
 
@@ -60,6 +64,15 @@ defineEventStreamStoreContractTests('Postgres EventStreamStore', {
 		const adapter = postgresFromRunner(runner);
 		await adapter.migrate?.();
 		return adapter.connectEventStreamStore();
+	},
+});
+
+defineRunStoreContractTests('Postgres RunStore', {
+	async create() {
+		const runner = createPgliteRunner();
+		const adapter = postgresFromRunner(runner);
+		await adapter.migrate?.();
+		return adapter.connectRunStore();
 	},
 });
 
