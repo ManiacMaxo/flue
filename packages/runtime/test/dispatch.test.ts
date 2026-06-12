@@ -4,10 +4,9 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai';
+import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Type } from '@earendil-works/pi-ai';
 import { createAgent } from '../src/agent-definition.ts';
-import { defineTool } from '../src/tool.ts';
 import { dispatch } from '../src/index.ts';
 import {
 	configureFlueRuntime,
@@ -16,15 +15,16 @@ import {
 	type DispatchQueue,
 	InMemorySessionStore,
 } from '../src/internal.ts';
-import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import {
-	createAgentSubmissionSessionHandler,
 	createAgentSubmissionObserverRegistry,
+	createAgentSubmissionSessionHandler,
 	createDispatchAgentSubmissionInput,
 	type DirectAgentSubmissionInput,
 } from '../src/runtime/agent-submissions.ts';
+import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
 import { createSessionStorageKey } from '../src/session-identity.ts';
+import { defineTool } from '../src/tool.ts';
 import type { AgentConfig } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 import { createTestEventStreamStore } from './helpers/test-event-stream-store.ts';
@@ -937,7 +937,7 @@ describe('repairInterruptedToolCalls()', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up.',
-			parameters: Type.Object({ q: Type.String() }),
+			parameters: v.object({ q: v.string() }),
 			execute: async () => 'found it',
 		});
 		const events: Array<
@@ -1016,7 +1016,7 @@ describe('repairInterruptedToolCalls()', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up.',
-			parameters: Type.Object({ q: Type.String() }),
+			parameters: v.object({ q: v.string() }),
 			execute: async () => 'found it',
 		});
 		const phases: string[] = [];

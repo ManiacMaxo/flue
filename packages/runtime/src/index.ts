@@ -1,9 +1,8 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
-export { Type } from '@earendil-works/pi-ai';
-export type { PersistenceAdapter } from './agent-execution-store.ts';
 export { createAgent, defineAgentProfile } from './agent-definition.ts';
+export type { PersistenceAdapter } from './agent-execution-store.ts';
 export {
 	FlueError,
 	ModelNotConfiguredError,
@@ -17,16 +16,24 @@ export {
 	SubagentNotDeclaredError,
 	SubmissionTimeoutError,
 	TaskDepthExceededError,
+	ToolInputValidationError,
 	ToolNameConflictError,
+	type ToolValidationIssue,
 } from './errors.ts';
 export { IMAGE_DATA_OMITTED } from './event-redaction.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
 export { ResultUnavailableError } from './result.ts';
 export { type FlueEventSubscriber, observe } from './runtime/events.ts';
-export { dispatch } from './runtime/flue-app.ts';
 export type { AgentManifestEntry } from './runtime/flue-app.ts';
+export { dispatch } from './runtime/flue-app.ts';
 export { getRun, listAgents, listRuns } from './runtime/inspect.ts';
+export {
+	type HttpProviderRegistration,
+	type ProviderRegistration,
+	registerApiProvider,
+	registerProvider,
+} from './runtime/providers.ts';
 export type {
 	ListRunsOpts,
 	ListRunsResponse,
@@ -34,18 +41,11 @@ export type {
 	RunRecord,
 	RunStatus,
 } from './runtime/run-store.ts';
-export {
-	type HttpProviderRegistration,
-	type ProviderRegistration,
-	registerApiProvider,
-	registerProvider,
-} from './runtime/providers.ts';
 export { createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 export { defineTool } from './tool.ts';
 export type {
 	AgentCreateContext,
 	AgentDispatchRequest,
-	DurabilityConfig,
 	AgentHarnessOptions,
 	AgentProfile,
 	AgentRouteHandler,
@@ -57,6 +57,7 @@ export type {
 	CompactionConfig,
 	CreatedAgent,
 	DispatchReceipt,
+	DurabilityConfig,
 	FileStat,
 	FlueContext,
 	FlueEvent,
@@ -98,6 +99,7 @@ export type {
 	SkillReference,
 	TaskOptions,
 	ThinkingLevel,
+	ToolArgs,
 	ToolDefinition,
 	ToolParameters,
 	WorkflowRouteHandler,

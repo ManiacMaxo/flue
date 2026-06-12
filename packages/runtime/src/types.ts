@@ -1,5 +1,5 @@
 import type { AgentMessage, AgentTool, ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { ImageContent, Model, TSchema } from '@earendil-works/pi-ai';
+import type { ImageContent, Model } from '@earendil-works/pi-ai';
 
 export interface SignalMessage {
 	role: 'signal';
@@ -16,6 +16,7 @@ declare module '@earendil-works/pi-agent-core' {
 		signal: SignalMessage;
 	}
 }
+
 import type { MiddlewareHandler } from 'hono';
 import type * as v from 'valibot';
 
@@ -104,24 +105,42 @@ export type Skill =
 
 // ─── Custom Tools ───────────────────────────────────────────────────────────
 
-export type ToolParameters = TSchema | Record<string, unknown>;
+/**
+ * Schema for a custom tool's arguments: a valibot object schema for
+ * hand-written tools, or a raw JSON Schema document object as the interop
+ * escape hatch — schemas discovered from adapters such as MCP, or produced by
+ * other schema libraries (e.g. TypeBox schemas are structurally JSON Schema),
+ * pass through unchanged. The raw arm is intentionally `object`: JSON Schema
+ * documents have no useful structural type, and schema-builder outputs are
+ * interfaces that narrower record types would reject.
+ */
+export type ToolParameters = v.GenericSchema | object;
+
+/**
+ * Arguments delivered to a tool's `execute` callback. Valibot schemas yield
+ * their parsed output type; raw JSON Schema parameters yield an untyped
+ * record.
+ */
+export type ToolArgs<TParams extends ToolParameters> = [TParams] extends [v.GenericSchema]
+	? v.InferOutput<TParams>
+	: Record<string, any>;
 
 /**
  * Custom tool passed to createAgent(), init(), prompt(), skill(), or task().
  * Agent and init tools are available to every session call; prompt/skill/task
  * tools are scoped to that call.
- * Parameters are JSON Schema-compatible. Use `Type` from `@flue/runtime` for
- * hand-written tools, or pass schemas discovered from adapters such as MCP.
+ * Build `parameters` with valibot (`v.object({ ... })`), or pass a raw JSON
+ * Schema object for schemas produced elsewhere.
  */
 export interface ToolDefinition<TParams extends ToolParameters = ToolParameters> {
 	/** Must be unique across built-in and custom tools. */
 	name: string;
 	/** Tells the LLM when and how to use this tool. */
 	description: string;
-	/** JSON Schema-compatible parameter schema. */
+	/** Valibot object schema or raw JSON Schema object. */
 	parameters: TParams;
 	/** Returns a string result sent back to the LLM. Thrown errors become tool errors. */
-	execute: (args: Record<string, any>, signal?: AbortSignal) => Promise<string>;
+	execute: (args: ToolArgs<TParams>, signal?: AbortSignal) => Promise<string>;
 }
 
 // ─── File Stat ──────────────────────────────────────────────────────────────

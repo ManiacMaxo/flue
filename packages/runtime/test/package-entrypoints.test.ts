@@ -30,8 +30,8 @@ describe('package entrypoints', () => {
 			observe: expect.any(Function),
 			registerApiProvider: expect.any(Function),
 			registerProvider: expect.any(Function),
-			Type: expect.objectContaining({ Object: expect.any(Function) }),
 		});
+		expect(runtime).not.toHaveProperty('Type');
 		expect(runtime).not.toHaveProperty('resetFlueRuntimeForTests');
 		expect(runtime).not.toHaveProperty('resetProvidersForTests');
 	});

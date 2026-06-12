@@ -5,6 +5,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai';
+import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	createAgent,
@@ -13,7 +14,6 @@ import {
 	ModelNotConfiguredError,
 	SessionBusyError,
 	SubagentNotDeclaredError,
-	Type,
 } from '../src/index.ts';
 import { createFlueContext, InMemorySessionStore } from '../src/internal.ts';
 import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
@@ -347,7 +347,7 @@ describe('session.prompt()', () => {
 			const lookup = defineTool({
 				name: 'lookup',
 				description: 'Look up a value.',
-				parameters: Type.Object({ query: Type.String() }),
+				parameters: v.object({ query: v.string() }),
 				execute: async () => 'Found the requested value.',
 			});
 			const ctx = createContext(provider);
@@ -679,7 +679,7 @@ describe('session.task()', () => {
 					defineTool({
 						name: 'deploy_service',
 						description: 'Deploys the production service.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'deployed',
 					}),
 				],

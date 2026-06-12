@@ -262,13 +262,23 @@ export function createResultTools<S extends v.GenericSchema>(
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function needsEnvelope(schema: v.GenericSchema): boolean {
-	// Valibot's runtime `type` discriminator. Tool parameters must be an
-	// object at the top level; anything else gets wrapped in `{ result: ... }`.
-	const type = (schema as { type?: string }).type;
-	return !['object', 'strict_object', 'loose_object', 'object_with_rest'].includes(type ?? '');
+	// Tool parameters must be an object at the top level; anything else gets
+	// wrapped in `{ result: ... }`.
+	return !isTopLevelObjectSchema(schema);
 }
 
-function stripJsonSchemaMeta(jsonSchema: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Whether a valibot schema produces a top-level JSON Schema `object`, judged
+ * by valibot's runtime `type` discriminator. Every LLM provider requires tool
+ * arguments to be a top-level object.
+ */
+export function isTopLevelObjectSchema(schema: v.GenericSchema): boolean {
+	const type = (schema as { type?: string }).type;
+	return ['object', 'strict_object', 'loose_object', 'object_with_rest'].includes(type ?? '');
+}
+
+/** Drop `$schema` (valibot emits draft-07) — providers don't expect it. */
+export function stripJsonSchemaMeta(jsonSchema: Record<string, unknown>): Record<string, unknown> {
 	const { $schema: _schema, ...rest } = jsonSchema as { $schema?: unknown } & Record<
 		string,
 		unknown

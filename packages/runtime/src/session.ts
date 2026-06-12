@@ -28,9 +28,9 @@ import {
 	type TaskToolResultDetails,
 } from './agent.ts';
 import {
+	type AgentSubmissionStore,
 	DURABILITY_DEFAULT_MAX_ATTEMPTS,
 	DURABILITY_DEFAULT_TIMEOUT_MS,
-	type AgentSubmissionStore,
 	type SubmissionDurability,
 } from './agent-execution-store.ts';
 import {
@@ -78,13 +78,14 @@ import type {
 	ProcessAgentSubmissionOptions,
 } from './runtime/agent-submissions.ts';
 import { agentSubmissionDispatchInput } from './runtime/agent-submissions.ts';
-import { reconstructInterruptedStream, StreamChunkWriter } from './runtime/stream-chunks.ts';
 import type { DispatchInput } from './runtime/dispatch-queue.ts';
 import { generateOperationId, generateTurnId } from './runtime/ids.ts';
 import { getRegisteredApiKey, getRegisteredStoreResponses } from './runtime/providers.ts';
+import { reconstructInterruptedStream, StreamChunkWriter } from './runtime/stream-chunks.ts';
 import { createFlueFs } from './sandbox.ts';
-import { SessionHistory, createUserContextMessage, renderSignalMessage } from './session-history.ts';
+import { createUserContextMessage, renderSignalMessage, SessionHistory } from './session-history.ts';
 import { childTaskSessionStorageKey } from './session-identity.ts';
+import { normalizeToolDefinition } from './tool.ts';
 import type {
 	AgentConfig,
 	AgentProfile,
@@ -1099,8 +1100,11 @@ export class Session implements FlueSession {
 	): AgentTool<any>[] {
 		this.validateCustomToolNames(tools, builtinTools);
 
-		return tools.map(
-			(toolDef): AgentTool<any> => ({
+		return tools.map((rawToolDef): AgentTool<any> => {
+			// `defineTool()` already normalized its result; this catches inline
+			// tool literals whose valibot `parameters` never went through it.
+			const toolDef = normalizeToolDefinition(rawToolDef);
+			return {
 				name: toolDef.name,
 				label: toolDef.name,
 				description: toolDef.description,
@@ -1113,8 +1117,8 @@ export class Session implements FlueSession {
 						details: { customTool: toolDef.name },
 					};
 				},
-			}),
-		);
+			};
+		});
 	}
 
 	/** Reject custom tools that collide with active built-ins or each other. */

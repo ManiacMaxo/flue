@@ -582,6 +582,44 @@ export class ToolNameConflictError extends FlueError {
 }
 
 /**
+ * One validation failure from a tool-arguments schema, in Standard Schema's
+ * issues shape (https://standardschema.dev). `path` segments are the property
+ * keys leading to the failing value.
+ */
+export interface ToolValidationIssue {
+	readonly message: string;
+	readonly path?: readonly PropertyKey[];
+}
+
+/**
+ * Model-supplied tool arguments failed the tool's valibot `parameters`
+ * schema. Thrown from the tool's wrapped `execute`; the agent loop converts
+ * the throw into an error tool-result built from `message`, so the model sees
+ * the issues and can retry with corrected arguments. `meta.issues` carries
+ * the structured issues in Standard Schema's shape.
+ */
+export class ToolInputValidationError extends FlueError {
+	constructor({ tool, issues }: { tool: string; issues: readonly ToolValidationIssue[] }) {
+		const summary = issues
+			.map((issue) =>
+				issue.path && issue.path.length > 0
+					? `${issue.message} (at ${issue.path.map(String).join('.')})`
+					: issue.message,
+			)
+			.join('; ');
+		super({
+			type: 'tool_input_validation',
+			message:
+				`Arguments for tool "${tool}" do not match the required schema: ${summary}. ` +
+				'Call the tool again with corrected arguments.',
+			details: '',
+			dev: '',
+			meta: { tool, issues },
+		});
+	}
+}
+
+/**
  * A session operation ran but did not complete successfully — the underlying
  * model call errored, or a durable input could not be persisted or recovered.
  * `reason` carries the underlying failure text; it is part of the message so

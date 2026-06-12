@@ -6,7 +6,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createAgent, IMAGE_DATA_OMITTED, Type } from '../src/index.ts';
+import { createAgent, IMAGE_DATA_OMITTED } from '../src/index.ts';
 import { createFlueContext, InMemorySessionStore } from '../src/internal.ts';
 import type { FlueEvent, SessionData, SessionStore } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -154,7 +154,7 @@ describe('session event image redaction', () => {
 							name: 'screenshot',
 							label: 'Screenshot',
 							description: 'Capture a screenshot.',
-							parameters: Type.Object({}),
+							parameters: { type: 'object', properties: {} },
 							execute: async () => ({
 								content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
 								details: {},
@@ -251,7 +251,7 @@ describe('session event image redaction', () => {
 							name: 'screenshot',
 							label: 'Screenshot',
 							description: 'Capture a screenshot.',
-							parameters: Type.Object({}),
+							parameters: { type: 'object', properties: {} },
 							execute: async () => ({
 								content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
 								details: {},

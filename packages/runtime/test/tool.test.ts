@@ -4,8 +4,9 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai';
+import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAgent, defineTool, ToolNameConflictError, Type } from '../src/index.ts';
+import { createAgent, defineTool, ToolNameConflictError } from '../src/index.ts';
 import { createFlueContext, InMemorySessionStore } from '../src/internal.ts';
 import type { SessionData, SessionStore } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -67,7 +68,7 @@ describe('defineTool()', () => {
 			defineTool({
 				name: '',
 				description: 'Look up a value.',
-				parameters: Type.Object({}),
+				parameters: v.object({}),
 				execute: async () => 'ok',
 			}),
 		).toThrow('name');
@@ -78,7 +79,7 @@ describe('defineTool()', () => {
 			defineTool({
 				name: 'lookup',
 				description: '',
-				parameters: Type.Object({}),
+				parameters: v.object({}),
 				execute: async () => 'ok',
 			}),
 		).toThrow('description');
@@ -99,9 +100,53 @@ describe('defineTool()', () => {
 			defineTool({
 				name: 'lookup',
 				description: 'Look up a value.',
-				parameters: Type.Object({}),
+				parameters: v.object({}),
 			} as never),
 		).toThrow('execute');
+	});
+
+	it('rejects a valibot parameters schema when its top level is not an object', () => {
+		expect(() =>
+			defineTool({
+				name: 'lookup',
+				description: 'Look up a value.',
+				parameters: v.string(),
+				execute: async () => 'ok',
+			}),
+		).toThrow('top-level object schema');
+	});
+
+	it('throws with Standard Schema issues when execute arguments fail the valibot schema', async () => {
+		const lookup = defineTool({
+			name: 'lookup',
+			description: 'Look up an order.',
+			parameters: v.object({
+				orderId: v.pipe(
+					v.string(),
+					v.check((id) => id.startsWith('order_'), 'Order IDs start with "order_".'),
+				),
+			}),
+			execute: async () => 'ok',
+		});
+
+		await expect(lookup.execute({ orderId: 'invoice_7' })).rejects.toMatchObject({
+			type: 'tool_input_validation',
+			meta: {
+				tool: 'lookup',
+				issues: [{ message: 'Order IDs start with "order_".', path: ['orderId'] }],
+			},
+		});
+	});
+
+	it('applies valibot defaults and transforms before execute receives arguments', async () => {
+		const lookup = defineTool({
+			name: 'lookup',
+			description: 'Look up recent values.',
+			parameters: v.object({ limit: v.optional(v.number(), 10) }),
+			execute: async ({ limit }) => `limit:${limit}`,
+		});
+
+		await expect(lookup.execute({})).resolves.toBe('limit:10');
 	});
 });
 
@@ -115,7 +160,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'bash',
 						description: 'Run bash.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -132,7 +177,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'activate_skill',
 						description: 'Activate a skill.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -149,7 +194,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'finish',
 						description: 'Finish the order.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -166,7 +211,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'lookup',
 						description: 'Look up a value.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -180,7 +225,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'lookup',
 						description: 'Look up another value.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -204,7 +249,7 @@ describe('custom tools', () => {
 					defineTool({
 						name: 'lookup',
 						description: 'Look up a value.',
-						parameters: Type.Object({}),
+						parameters: v.object({}),
 						execute: async () => 'ok',
 					}),
 				],
@@ -238,7 +283,7 @@ describe('custom tools', () => {
 				defineTool({
 					name: 'lookup',
 					description: 'Look up a value.',
-					parameters: Type.Object({}),
+					parameters: v.object({}),
 					execute: async () => 'ok',
 				}),
 			],
@@ -264,7 +309,7 @@ describe('custom tools', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up a count.',
-			parameters: Type.Object({ count: Type.Number() }),
+			parameters: v.object({ count: v.number() }),
 			execute: async (args, signal) => {
 				receivedArgs = args;
 				receivedSignal = signal;
@@ -314,7 +359,7 @@ describe('custom tools', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up a value.',
-			parameters: Type.Object({ query: Type.String() }),
+			parameters: v.object({ query: v.string() }),
 			execute: async () => 'Found the requested value.',
 		});
 		const harness = await createContext(provider, store).init(
@@ -352,7 +397,7 @@ describe('custom tools', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up a value.',
-			parameters: Type.Object({ query: Type.String() }),
+			parameters: v.object({ query: v.string() }),
 			execute: async () => 'Found the requested value.',
 		});
 		const harness = await createContext(provider, store).init(
@@ -381,7 +426,7 @@ describe('custom tools', () => {
 		const lookup = defineTool({
 			name: 'lookup',
 			description: 'Look up a value.',
-			parameters: Type.Object({ query: Type.String() }),
+			parameters: v.object({ query: v.string() }),
 			execute,
 		});
 		const harness = await createContext(provider).init(
@@ -402,5 +447,137 @@ describe('custom tools', () => {
 			isError: false,
 		});
 		expect(result.text).toBe('Lookup complete.');
+	});
+
+	it('exposes valibot parameters to the provider as one stable plain JSON Schema object', async () => {
+		const provider = createProvider();
+		const parameterSchemas: unknown[] = [];
+		provider.setResponses([
+			(context) => {
+				parameterSchemas.push(context.tools?.find((tool) => tool.name === 'lookup')?.parameters);
+				return fauxAssistantMessage('First.');
+			},
+			(context) => {
+				parameterSchemas.push(context.tools?.find((tool) => tool.name === 'lookup')?.parameters);
+				return fauxAssistantMessage('Second.');
+			},
+		]);
+		const harness = await createContext(provider).init(
+			createAgent(() => ({
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				tools: [
+					defineTool({
+						name: 'lookup',
+						description: 'Look up a value.',
+						parameters: v.object({ query: v.string() }),
+						execute: async () => 'ok',
+					}),
+				],
+			})),
+		);
+		const session = await harness.session();
+
+		await session.prompt('First prompt.');
+		await session.prompt('Second prompt.');
+
+		expect(parameterSchemas[0]).toEqual({
+			type: 'object',
+			properties: { query: { type: 'string' } },
+			required: ['query'],
+		});
+		// Same object identity across turns: the agent loop caches compiled
+		// argument validators keyed by schema identity.
+		expect(parameterSchemas[1]).toBe(parameterSchemas[0]);
+	});
+
+	it('returns a schema error to the model instead of calling execute when arguments fail valibot validation', async () => {
+		const provider = createProvider();
+		const execute = vi.fn(async () => 'ok');
+		let modelToolResult: unknown;
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('lookup', { orderId: 'invoice_7' }), {
+				stopReason: 'toolUse',
+			}),
+			(context) => {
+				modelToolResult = context.messages.at(-1);
+				return fauxAssistantMessage('Understood, correcting.');
+			},
+		]);
+		const lookup = defineTool({
+			name: 'lookup',
+			description: 'Look up an order.',
+			parameters: v.object({
+				orderId: v.pipe(
+					v.string(),
+					v.check((id) => id.startsWith('order_'), 'Order IDs start with "order_".'),
+				),
+			}),
+			execute,
+		});
+		const harness = await createContext(provider).init(
+			createAgent(() => ({
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				tools: [lookup],
+			})),
+		);
+		const session = await harness.session();
+
+		const result = await session.prompt('Look up invoice_7.');
+
+		expect(execute).not.toHaveBeenCalled();
+		expect(modelToolResult).toMatchObject({
+			role: 'toolResult',
+			toolName: 'lookup',
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: expect.stringContaining('Order IDs start with "order_". (at orderId)'),
+				},
+			],
+		});
+		expect(result.text).toBe('Understood, correcting.');
+	});
+
+	it('passes raw JSON Schema parameters through unchanged when a tool uses the escape hatch', async () => {
+		const provider = createProvider();
+		const rawSchema = {
+			type: 'object',
+			properties: { query: { type: 'string', description: 'Search query.' } },
+			required: ['query'],
+			additionalProperties: false,
+		};
+		let providerSchema: unknown;
+		let receivedArgs: unknown;
+		provider.setResponses([
+			(context) => {
+				providerSchema = context.tools?.find((tool) => tool.name === 'lookup')?.parameters;
+				return fauxAssistantMessage(fauxToolCall('lookup', { query: 'flue' }), {
+					stopReason: 'toolUse',
+				});
+			},
+			fauxAssistantMessage('Done.'),
+		]);
+		const lookup = defineTool({
+			name: 'lookup',
+			description: 'Look up a value.',
+			parameters: rawSchema,
+			execute: async (args) => {
+				receivedArgs = args;
+				return 'ok';
+			},
+		});
+		const harness = await createContext(provider).init(
+			createAgent(() => ({
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				tools: [lookup],
+			})),
+		);
+		const session = await harness.session();
+
+		await session.prompt('Look up flue.');
+
+		expect(providerSchema).toBe(rawSchema);
+		expect(receivedArgs).toEqual({ query: 'flue' });
 	});
 });
