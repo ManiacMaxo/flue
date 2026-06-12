@@ -286,7 +286,6 @@ export async function run({ init, payload }: FlueContext) {
   const harness = await init(support);
   const session = await harness.session();
 
-  await session.fs.mkdir('/workspace/articles', { recursive: true });
   await session.fs.writeFile(
     '/workspace/articles/reset-password.md',
     '# Reset your password\n\nUse the account settings page to request a password reset email.',

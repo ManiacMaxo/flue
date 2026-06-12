@@ -132,6 +132,8 @@ Return raw bytes as a `Uint8Array`. If the SDK gives you a Node `Buffer`, wrap i
 
 Write `content` to `path`. Accept both `string` and `Uint8Array`. Convert strings to UTF-8 bytes before sending them to providers that only accept buffers.
 
+Connectors need not create parent directories; the runtime guarantees it. When a write fails, `createSandboxSessionEnv` calls your `mkdir(parent, { recursive: true })` and retries the write once, so `FlueFs.writeFile` behaves identically across every sandbox mode. Let missing-parent errors from the provider propagate — do not add your own parent creation.
+
 ### `stat(path)`
 
 Return a `FileStat`. If the provider SDK does not expose modification time or size, use sensible defaults such as `new Date()` and `0`. Use `isSymbolicLink: false` if the SDK does not expose symlink information.

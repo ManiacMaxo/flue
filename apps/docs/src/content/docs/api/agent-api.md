@@ -568,6 +568,8 @@ interface FlueFs {
 
 Paths may be absolute or relative. Relative paths use the configured `cwd`, or the sandbox connector's default when `cwd` is omitted; use absolute paths for portability across connectors. These operations are out-of-band and do not appear in conversation history.
 
+`writeFile()` creates missing parent directories automatically, in every sandbox mode — no prior `mkdir()` is needed before writing to a nested path.
+
 #### `FileStat`
 
 ```ts
