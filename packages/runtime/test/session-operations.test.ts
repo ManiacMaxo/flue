@@ -6,7 +6,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAgent, defineAgentProfile } from '../src/index.ts';
+import { createAgent, defineAgentProfile, defineTool, Type } from '../src/index.ts';
 import { createFlueContext, InMemorySessionStore } from '../src/internal.ts';
 import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
 import type { SessionData, SessionEnv, SessionStore } from '../src/types.ts';
@@ -311,6 +311,53 @@ describe('session.prompt()', () => {
 
 			await rejected;
 			expect(provider.state.callCount).toBe(4);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('retries every transient model error when successful turns separate the failures', async () => {
+		vi.useFakeTimers();
+		try {
+			const provider = createProvider([{ id: 'reviewer' }]);
+			const transientError = () =>
+				fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'overloaded_error' });
+			const lookupTurn = () =>
+				fauxAssistantMessage(fauxToolCall('lookup', { query: 'flue' }), { stopReason: 'toolUse' });
+			// Four isolated transient errors, each recovered and followed by a
+			// successful tool-use turn: only consecutive failures share a budget.
+			provider.setResponses([
+				transientError(),
+				lookupTurn(),
+				transientError(),
+				lookupTurn(),
+				transientError(),
+				lookupTurn(),
+				transientError(),
+				fauxAssistantMessage('Completed despite sporadic failures.'),
+			]);
+			const lookup = defineTool({
+				name: 'lookup',
+				description: 'Look up a value.',
+				parameters: Type.Object({ query: Type.String() }),
+				execute: async () => 'Found the requested value.',
+			});
+			const ctx = createContext(provider);
+			const harness = await ctx.init(
+				createAgent(() => ({
+					model: `${provider.getModel().provider}/reviewer`,
+					tools: [lookup],
+				})),
+			);
+			const session = await harness.session();
+
+			const response = session.prompt('Review this workspace.');
+			await vi.runAllTimersAsync();
+
+			await expect(response).resolves.toMatchObject({
+				text: 'Completed despite sporadic failures.',
+			});
+			expect(provider.state.callCount).toBe(8);
 		} finally {
 			vi.useRealTimers();
 		}

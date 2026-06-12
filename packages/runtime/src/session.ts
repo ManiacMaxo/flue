@@ -343,7 +343,11 @@ function countConsecutiveRetryableModelErrors(entries: SessionEntry[]): number {
 	let count = 0;
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (entry?.type !== 'message' || entry.message.role !== 'assistant') continue;
+		if (entry?.type !== 'message') continue;
+		// User messages mark an operation boundary: errors from a previous
+		// operation must not count against the current one.
+		if (entry.message.role === 'user') return count;
+		if (entry.message.role !== 'assistant') continue;
 		if (!isRetryableModelError(entry.message as AssistantMessage)) return count;
 		count += 1;
 	}
@@ -1691,12 +1695,10 @@ export class Session implements FlueSession {
 		start: () => Promise<void>;
 		source: MessageSource;
 		signal: AbortSignal;
-		transientRetries?: number;
 		overflowRecoveryAttempted?: boolean;
 	}): Promise<void> {
 		let start = options.start;
 		let source = options.source;
-		let transientRetries = options.transientRetries ?? 0;
 		let overflowRecoveryAttempted = options.overflowRecoveryAttempted ?? false;
 
 		while (true) {
@@ -1749,7 +1751,11 @@ export class Session implements FlueSession {
 			}
 
 			if (isRetryableModelError(assistant)) {
-				transientRetries += 1;
+				// Count trailing consecutive errors from durable history (the error
+				// was just checkpointed) so isolated transient errors separated by
+				// successful turns don't share one budget. This keeps the live
+				// budget identical to the one a restart would compute.
+				const transientRetries = countConsecutiveRetryableModelErrors(this.history.getActivePath());
 				if (!(await this.waitForTransientModelRetry(assistant, transientRetries))) return;
 				start = () => this.harness.continue();
 				source = 'retry';
@@ -2210,7 +2216,6 @@ export class Session implements FlueSession {
 							start: () => this.harness.continue(),
 							source: assistant ? 'retry' : options.outputSource,
 							signal: options.signal,
-							transientRetries,
 							overflowRecoveryAttempted: overflow,
 						});
 						this.throwIfError(options.errorLabel);
