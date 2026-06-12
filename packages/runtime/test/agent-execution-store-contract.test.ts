@@ -163,6 +163,67 @@ describe('sqlite() PersistenceAdapter', () => {
 		adapter.close?.();
 	});
 
+	it('preserves workflow run records and run listing across close() and reconnect cycles', async () => {
+		const dir = createTempDir();
+		const dbPath = join(dir, 'run-restart-test.db');
+		const adapter = sqlite(dbPath);
+
+		adapter.migrate?.();
+		const runStore1 = adapter.connectRunStore();
+		const runRegistry1 = adapter.connectRunRegistry();
+		await runStore1.createRun({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			startedAt: '2026-06-03T00:00:00.000Z',
+			payload: { day: 'wednesday' },
+		});
+		await runRegistry1.recordRunStart({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			startedAt: '2026-06-03T00:00:00.000Z',
+		});
+		await runStore1.endRun({
+			runId: 'workflow:daily-report:01',
+			endedAt: '2026-06-03T00:00:01.000Z',
+			isError: false,
+			durationMs: 1000,
+			result: { report: 'done' },
+		});
+		await runRegistry1.recordRunEnd({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			startedAt: '2026-06-03T00:00:00.000Z',
+			endedAt: '2026-06-03T00:00:01.000Z',
+			durationMs: 1000,
+			isError: false,
+		});
+		adapter.close?.();
+
+		adapter.migrate?.();
+		const runStore2 = adapter.connectRunStore();
+		const runRegistry2 = adapter.connectRunRegistry();
+		expect(await runStore2.getRun('workflow:daily-report:01')).toMatchObject({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			status: 'completed',
+			payload: { day: 'wednesday' },
+			result: { report: 'done' },
+		});
+		expect(await runRegistry2.lookupRun('workflow:daily-report:01')).toMatchObject({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			status: 'completed',
+		});
+		const listed = await runRegistry2.listRuns();
+		expect(listed.runs).toHaveLength(1);
+		expect(listed.runs[0]).toMatchObject({
+			runId: 'workflow:daily-report:01',
+			workflowName: 'daily-report',
+			status: 'completed',
+		});
+		adapter.close?.();
+	});
+
 	it('returns an in-memory store when no path is provided', async () => {
 		const adapter = sqlite();
 		adapter.migrate?.();

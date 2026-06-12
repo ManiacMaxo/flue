@@ -1,4 +1,4 @@
-/** In-memory `RunRegistry` for workflow runs on the Node target. */
+/** In-memory `RunRegistry` for explicitly non-durable (no-database) setups. */
 import {
 	type CursorTuple,
 	DEFAULT_LIST_LIMIT,

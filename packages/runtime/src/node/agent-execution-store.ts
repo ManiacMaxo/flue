@@ -10,9 +10,9 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AgentExecutionStore, PersistenceAdapter } from '../agent-execution-store.ts';
-import { InMemoryRunRegistry } from './run-registry.ts';
-import { InMemoryRunStore } from './run-store.ts';
 import type { SqlStorage } from '../sql-storage.ts';
+import { createSqlRunRegistry } from '../sql-run-registry.ts';
+import { createSqlRunStore } from '../sql-run-store.ts';
 import { SqliteEventStreamStore } from '../runtime/event-stream-store.ts';
 import { createSqlAgentExecutionStoreFromSql, ensureSqlAgentExecutionTables } from '../sql-agent-execution-store.ts';
 
@@ -137,10 +137,10 @@ export function sqlite(path?: string): PersistenceAdapter {
 			return createSqlAgentExecutionStoreFromSql(sql, runTransaction);
 		},
 		connectRunStore() {
-			return new InMemoryRunStore();
+			return createSqlRunStore(ensureOpen().sql);
 		},
 		connectRunRegistry() {
-			return new InMemoryRunRegistry();
+			return createSqlRunRegistry(ensureOpen().sql);
 		},
 		connectEventStreamStore() {
 			return new SqliteEventStreamStore(ensureOpen().sql);

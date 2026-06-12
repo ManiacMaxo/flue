@@ -1,3 +1,4 @@
+/** In-memory `RunStore` for explicitly non-durable (no-database) setups. */
 import {
 	type CreateRunInput,
 	type EndRunInput,
