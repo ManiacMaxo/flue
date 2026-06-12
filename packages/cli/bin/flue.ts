@@ -261,7 +261,23 @@ type ParsedArgs =
 	| InitArgs
 	| LogsArgs;
 
-function parseFlags(flags: string[]): {
+/** Every flag `parseFlags` knows how to parse, across all commands that use it. */
+const SHARED_FLAGS = new Set([
+	'--payload',
+	'--target',
+	'--root',
+	'--output',
+	'--config',
+	'--port',
+	'--env',
+]);
+
+function parseFlags(
+	command: 'build' | 'dev' | 'run' | 'connect',
+	args: string[],
+	allowed: ReadonlySet<string>,
+): {
+	positionals: string[];
 	target?: 'node' | 'cloudflare';
 	explicitRoot: string | undefined;
 	explicitOutput: string | undefined;
@@ -270,6 +286,7 @@ function parseFlags(flags: string[]): {
 	port: number;
 	envFile: string | undefined;
 } {
+	const positionals: string[] = [];
 	let target: 'node' | 'cloudflare' | undefined;
 	let explicitRoot: string | undefined;
 	let explicitOutput: string | undefined;
@@ -278,16 +295,32 @@ function parseFlags(flags: string[]): {
 	let port = 0;
 	let envFile: string | undefined;
 
-	for (let i = 0; i < flags.length; i++) {
-		const arg = flags[i];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === undefined) continue;
+		if (!arg.startsWith('--')) {
+			positionals.push(arg);
+			continue;
+		}
+		if (!SHARED_FLAGS.has(arg)) {
+			console.error(`Unknown flag for \`flue ${command}\`: ${arg}`);
+			printUsage();
+			process.exit(1);
+		}
+		if (!allowed.has(arg)) {
+			const hint =
+				command === 'connect' && arg === '--payload' ? '; enter prompts after connecting' : '';
+			console.error(`\`flue ${command}\` does not accept ${arg}${hint}.`);
+			process.exit(1);
+		}
 		if (arg === '--payload') {
-			payload = flags[++i] ?? '';
+			payload = args[++i] ?? '';
 			if (!payload) {
 				console.error('Missing value for --payload');
 				process.exit(1);
 			}
 		} else if (arg === '--target') {
-			const targetFlag = flags[++i];
+			const targetFlag = args[++i];
 			if (!targetFlag) {
 				console.error('Missing value for --target');
 				process.exit(1);
@@ -298,32 +331,32 @@ function parseFlags(flags: string[]): {
 			}
 			target = targetFlag;
 		} else if (arg === '--root') {
-			explicitRoot = flags[++i] ?? '';
+			explicitRoot = args[++i] ?? '';
 			if (!explicitRoot) {
 				console.error('Missing value for --root');
 				process.exit(1);
 			}
 		} else if (arg === '--output') {
-			explicitOutput = flags[++i] ?? '';
+			explicitOutput = args[++i] ?? '';
 			if (!explicitOutput) {
 				console.error('Missing value for --output');
 				process.exit(1);
 			}
 		} else if (arg === '--config') {
-			configFile = flags[++i] ?? '';
+			configFile = args[++i] ?? '';
 			if (!configFile) {
 				console.error('Missing value for --config');
 				process.exit(1);
 			}
 		} else if (arg === '--port') {
-			const portStr = flags[++i];
+			const portStr = args[++i];
 			port = parseInt(portStr ?? '', 10);
 			if (Number.isNaN(port)) {
 				console.error('Invalid value for --port');
 				process.exit(1);
 			}
 		} else if (arg === '--env') {
-			const value = flags[++i];
+			const value = args[++i];
 			if (!value) {
 				console.error('Missing value for --env');
 				process.exit(1);
@@ -335,14 +368,11 @@ function parseFlags(flags: string[]): {
 				process.exit(1);
 			}
 			envFile = value;
-		} else {
-			console.error(`Unknown argument: ${arg}`);
-			printUsage();
-			process.exit(1);
 		}
 	}
 
 	return {
+		positionals,
 		target,
 		explicitRoot: explicitRoot ? path.resolve(explicitRoot) : undefined,
 		explicitOutput: explicitOutput ? path.resolve(explicitOutput) : undefined,
@@ -680,7 +710,16 @@ function parseArgs(argv: string[]): ParsedArgs {
 	// `resolveCliConfig` enforces it being set somewhere by the time we need it.
 
 	if (command === 'build') {
-		const flags = parseFlags(rest);
+		const flags = parseFlags(
+			'build',
+			rest,
+			new Set(['--target', '--root', '--output', '--config', '--env']),
+		);
+		if (flags.positionals.length > 0) {
+			console.error(`Unexpected argument for \`flue build\`: ${flags.positionals[0]}`);
+			printUsage();
+			process.exit(1);
+		}
 		return {
 			command: 'build',
 			target: flags.target,
@@ -692,7 +731,16 @@ function parseArgs(argv: string[]): ParsedArgs {
 	}
 
 	if (command === 'dev') {
-		const flags = parseFlags(rest);
+		const flags = parseFlags(
+			'dev',
+			rest,
+			new Set(['--target', '--root', '--output', '--config', '--port', '--env']),
+		);
+		if (flags.positionals.length > 0) {
+			console.error(`Unexpected argument for \`flue dev\`: ${flags.positionals[0]}`);
+			printUsage();
+			process.exit(1);
+		}
 		return {
 			command: 'dev',
 			target: flags.target,
@@ -704,24 +752,24 @@ function parseArgs(argv: string[]): ParsedArgs {
 		};
 	}
 
-	if (command === 'connect' && rest.length >= 2) {
-		const agent = rest[0];
-		const instanceId = rest[1];
+	if (command === 'connect') {
+		const flags = parseFlags(
+			'connect',
+			rest,
+			new Set(['--target', '--root', '--output', '--config', '--env']),
+		);
+		const [agent, instanceId, ...extra] = flags.positionals;
 		if (!agent || !instanceId) {
 			console.error('Missing agent name or instance id for connect command.');
 			printUsage();
 			process.exit(1);
 		}
-		const flags = parseFlags(rest.slice(2));
+		if (extra.length > 0) {
+			console.error(`Unexpected extra arguments for \`flue connect\`: ${extra.join(' ')}`);
+			printUsage();
+			process.exit(1);
+		}
 		if (flags.target === 'cloudflare') printCloudflareConnectUnsupported();
-		if (flags.payload !== '{}') {
-			console.error('`flue connect` does not accept --payload; enter prompts after connecting.');
-			process.exit(1);
-		}
-		if (flags.port !== 0) {
-			console.error('`flue connect` does not accept --port.');
-			process.exit(1);
-		}
 		return {
 			command: 'connect',
 			agent,
@@ -734,14 +782,23 @@ function parseArgs(argv: string[]): ParsedArgs {
 		};
 	}
 
-	if (command === 'run' && rest.length > 0) {
-		const workflow = rest[0];
+	if (command === 'run') {
+		const flags = parseFlags(
+			'run',
+			rest,
+			new Set(['--target', '--payload', '--root', '--output', '--config', '--env']),
+		);
+		const [workflow, ...extra] = flags.positionals;
 		if (!workflow) {
 			console.error('Missing workflow name for run command.');
 			printUsage();
 			process.exit(1);
 		}
-		const flags = parseFlags(rest.slice(1));
+		if (extra.length > 0) {
+			console.error(`Unexpected extra arguments for \`flue run\`: ${extra.join(' ')}`);
+			printUsage();
+			process.exit(1);
+		}
 
 		// `flue run` only supports node. If the user explicitly asked for
 		// cloudflare on the CLI, bail with the usual usage hint. The case
@@ -749,10 +806,6 @@ function parseArgs(argv: string[]): ParsedArgs {
 		// in `run()` after config resolution.
 		if (flags.target === 'cloudflare') {
 			printCloudflareRunUnsupported(workflow, flags.payload);
-		}
-		if (flags.port !== 0) {
-			console.error('`flue run` does not accept --port.');
-			process.exit(1);
 		}
 		try {
 			JSON.parse(flags.payload);
@@ -1977,9 +2030,9 @@ function printHumanInstructions(args: AddArgs) {
 	stream.write('To install this connector, pipe it to your coding agent:\n\n');
 	stream.write(`  ${cmd} --print | claude\n`);
 	stream.write(`  ${cmd} --print | codex\n`);
-	stream.write(`  ${cmd} --print | cursor-agent\n\n`);
+	stream.write(`  ${cmd} --print | cursor-agent\n`);
 	stream.write(`  ${cmd} --print | opencode\n`);
-	stream.write(`  ${cmd} --print | pi\n`);
+	stream.write(`  ${cmd} --print | pi\n\n`);
 	stream.write('Or paste this prompt into any agent:\n\n');
 	stream.write(`  Run "${cmd} --print" and follow the instructions.\n`);
 }
