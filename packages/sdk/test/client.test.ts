@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import {
 	type AgentPromptOptions,
@@ -145,6 +146,22 @@ describe('createFlueClient', () => {
 			eventStream.cancel();
 
 			await expect(next).resolves.toEqual({ value: undefined, done: true });
+		});
+
+		it('removes the listener on an external signal when the initial connection fails', async () => {
+			const client = createFlueClient({
+				baseUrl: 'https://flue.test',
+				fetch: async () => new Response('not found', { status: 404 }),
+			});
+
+			// A long-lived signal reused across retry attempts must not
+			// accumulate one 'abort' listener per failed connection.
+			const controller = new AbortController();
+			const eventStream = client.agents.stream('agent', 'missing', { live: false, signal: controller.signal });
+			const iterator = eventStream[Symbol.asyncIterator]();
+
+			await expect(iterator.next()).rejects.toThrow();
+			expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
 		});
 
 		it('tracks the latest stream offset after reading an event', async () => {

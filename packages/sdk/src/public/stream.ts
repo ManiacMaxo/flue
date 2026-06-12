@@ -209,8 +209,8 @@ export function createFlueEventStream<T = FlueEvent>(
 						// again instead of waiting forever for batches that will
 						// never arrive.
 						started = false;
+						removeExternalAbortListener?.();
 						if (abortController.signal.aborted || isAbortError(err)) {
-							removeExternalAbortListener?.();
 							return { value: undefined as T, done: true };
 						}
 						throw err;
