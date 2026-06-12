@@ -28,12 +28,16 @@ export interface McpServerOptions {
 	/** Custom fetch implementation used by the MCP transport. */
 	fetch?: typeof fetch;
 	/** Per-request timeout in milliseconds for MCP requests. Defaults to the MCP SDK default (60 seconds). */
-	timeout?: number;
+	timeoutMs?: number;
 	/** Reset the per-request timeout whenever the server sends a progress notification. Defaults to `false`. */
 	resetTimeoutOnProgress?: boolean;
 }
 
-type McpRequestOptions = Pick<McpServerOptions, 'timeout' | 'resetTimeoutOnProgress'>;
+/** Request options in the MCP SDK's shape (its `timeout` is milliseconds). */
+type McpRequestOptions = {
+	timeout?: number;
+	resetTimeoutOnProgress?: boolean;
+};
 
 /** Connection returned by {@link connectMcpServer}. */
 export interface McpServerConnection {
@@ -73,7 +77,7 @@ export async function connectMcpServer(
 	});
 
 	return connectMcpServerWithClient(name, client, transport, {
-		timeout: options.timeout,
+		timeout: options.timeoutMs,
 		resetTimeoutOnProgress: options.resetTimeoutOnProgress,
 	});
 }
