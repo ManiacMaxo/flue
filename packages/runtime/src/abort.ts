@@ -47,6 +47,11 @@ export function createCallHandle<T>(
 			externalSignal.removeEventListener('abort', externalListener);
 		}
 	});
+	// Callers may never await the handle (fire-and-forget calls, or aborting
+	// and dropping the handle) — keep a rejection from surfacing as an
+	// unhandled-rejection crash. `then()` below still returns the rejecting
+	// promise to consumers that do await.
+	promise.catch(() => {});
 
 	return {
 		signal: controller.signal,

@@ -914,4 +914,48 @@ describe('CallHandle', () => {
 			message: 'inspect signal',
 		});
 	});
+
+	it('does not emit an unhandled rejection when an unawaited handle is aborted and dropped', async () => {
+		const provider = createProvider([{ id: 'reviewer' }]);
+		let markStarted: () => void = () => {};
+		const started = new Promise<void>((resolve) => {
+			markStarted = resolve;
+		});
+		provider.setResponses([
+			() => {
+				markStarted();
+				return fauxAssistantMessage('A response long enough to remain active during cancellation.');
+			},
+		]);
+		const ctx = createContext(provider);
+		const harness = await ctx.init(
+			createAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+		);
+		const session = await harness.session();
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => {
+			unhandled.push(reason);
+		};
+		process.on('unhandledRejection', onUnhandled);
+		try {
+			const operation = session.prompt('Begin a fire-and-forget review.');
+			await started;
+			operation.abort('cancelled without awaiting');
+
+			// Unhandled rejections surface on later macrotask turns; give the
+			// dropped handle several turns to settle before checking.
+			for (let i = 0; i < 5; i++) {
+				await new Promise<void>((resolve) => setImmediate(resolve));
+			}
+			expect(unhandled).toEqual([]);
+			// Confirm the operation actually rejected, so the assertion above
+			// could not pass vacuously.
+			await expect(operation).rejects.toMatchObject({
+				name: 'AbortError',
+				message: 'cancelled without awaiting',
+			});
+		} finally {
+			process.off('unhandledRejection', onUnhandled);
+		}
+	});
 });
