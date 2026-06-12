@@ -12,6 +12,7 @@ import type {
 	CallHandle,
 	CreatedAgent,
 	DirectAgentPayload,
+	PromptResponse,
 } from '../types.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
 import { assertAgentDispatchAdmissionInput } from './handle-agent.ts';
@@ -87,6 +88,7 @@ interface AgentSubmissionToolRequest {
  */
 export interface AgentSubmissionSession {
 	inspectSubmissionInput(input: AgentSubmissionInput): AgentSubmissionInspection;
+	reconstructSubmissionResult(input: AgentSubmissionInput): PromptResponse | undefined;
 	processSubmissionInput(
 		input: AgentSubmissionInput,
 		options?: ProcessAgentSubmissionOptions,
@@ -266,14 +268,24 @@ function createSubmissionJournalCallbacks(
 }
 
 /**
- * Reconciliation result. `replacement` is the new submission to start when
- * a restart is needed. `failedError` is set when the submission was
- * terminalized — the caller can use it for observer notification.
+ * Reconciliation disposition for an interrupted submission. Coordinators
+ * use it for observer notification and replacement-attempt scheduling:
+ *
+ * - `replacement` — a new attempt was claimed; start processing it.
+ * - `completed` — the canonical response had already completed; the
+ *   submission settled as success and `result` carries the reconstructed
+ *   response (or undefined when the session could not reproduce one).
+ * - `requeued` — provably-unstarted work went back to the queue.
+ * - `failed` — the submission was terminalized with `error`.
+ * - `stale` — another attempt owns or already settled the submission;
+ *   nothing for this caller to notify or start.
  */
-interface ReconciliationResult {
-	readonly replacement: AgentSubmission | null;
-	readonly failedError: Error | null;
-}
+type ReconciliationResult =
+	| { readonly disposition: 'replacement'; readonly submission: AgentSubmission }
+	| { readonly disposition: 'completed'; readonly result: unknown }
+	| { readonly disposition: 'requeued' }
+	| { readonly disposition: 'failed'; readonly error: Error }
+	| { readonly disposition: 'stale' };
 
 /**
  * Shared reconciliation decision tree for an interrupted running submission.
@@ -292,7 +304,7 @@ export async function reconcileInterruptedSubmission(
 ): Promise<ReconciliationResult> {
 	const { input } = submission;
 	const attempt = submissionAttemptRef(submission);
-	if (!attempt) return { replacement: null, failedError: null };
+	if (!attempt) return { disposition: 'stale' };
 
 	// Inspect canonical session state first: a completed canonical response
 	// is finished provider work and settles as success unconditionally. The
@@ -302,10 +314,22 @@ export async function reconcileInterruptedSubmission(
 	const payload = agentSubmissionPayload(input);
 	const dispatchId = agentSubmissionDispatchId(input);
 	const ctx = createContext(payload, dispatchId);
-	const state = await createAgentSubmissionSessionHandler(agent, input, (s) => s.inspectSubmissionInput(input))(ctx);
+	const inspected = (await createAgentSubmissionSessionHandler(agent, input, (s) => {
+		const state = s.inspectSubmissionInput(input);
+		return {
+			state,
+			result: state === 'completed' ? s.reconstructSubmissionResult(input) : undefined,
+		};
+	})(ctx)) as { state: AgentSubmissionInspection; result: unknown };
+	const state = inspected.state;
 	if (state === 'completed') {
-		await submissions.completeSubmission(attempt);
-		return { replacement: null, failedError: null };
+		// Settle as success and surface the persisted result. When the
+		// settlement CAS is lost (another claimant settled first) the result
+		// is still real — return it so a live observer resolves instead of
+		// hanging; only the CAS winner emits the durable settlement event.
+		const settled = await submissions.completeSubmission(attempt);
+		if (settled) emitSubmissionSettled(ctx, submission.submissionId, 'completed');
+		return { disposition: 'completed', result: inspected.result };
 	}
 
 	// Check retry budget.
@@ -313,19 +337,17 @@ export async function reconcileInterruptedSubmission(
 		const error = new Error(
 			`[flue] Agent submission exceeded maximum recovery attempts (${submission.attemptCount}/${submission.maxRetry}).`,
 		);
-		const failed = await failInterruptedSubmission(
+		return failInterruptedSubmission(
 			submissions, submission, attempt, agent, 'exhausted_retry_budget', error, createContext,
 		);
-		return { replacement: null, failedError: failed ? error : null };
 	}
 
 	// Check timeout.
 	if (submission.timeoutAt > 0 && Date.now() >= submission.timeoutAt) {
 		const error = new Error('[flue] Agent submission exceeded configured timeout.');
-		const failed = await failInterruptedSubmission(
+		return failInterruptedSubmission(
 			submissions, submission, attempt, agent, 'exceeded_timeout', error, createContext,
 		);
-		return { replacement: null, failedError: failed ? error : null };
 	}
 
 	// Check turn journal for pre-commit interruption that can be retried.
@@ -361,7 +383,7 @@ export async function reconcileInterruptedSubmission(
 			await submissions.markStreamConsumed(attempt, journal.streamKey);
 			await submissions.deleteStreamChunkSegments(journal.streamKey);
 			const replacement = await submissions.replaceTurnJournalAttempt(attempt, crypto.randomUUID(), lease);
-			if (replacement) return { replacement, failedError: null };
+			if (replacement) return { disposition: 'replacement', submission: replacement };
 		}
 	}
 	if (
@@ -377,7 +399,7 @@ export async function reconcileInterruptedSubmission(
 		(state === 'continuable' || (state === 'uncertain' && journal.phase === 'before_provider'))
 	) {
 		const replacement = await submissions.replaceTurnJournalAttempt(attempt, crypto.randomUUID(), lease);
-		if (replacement) return { replacement, failedError: null };
+		if (replacement) return { disposition: 'replacement', submission: replacement };
 	}
 
 	// Check for interrupted tool calls that can be repaired.
@@ -397,11 +419,11 @@ export async function reconcileInterruptedSubmission(
 				checkpointLeafId: repairedLeafId,
 			});
 			const replacement = await submissions.replaceTurnJournalAttempt(attempt, crypto.randomUUID(), lease);
-			if (replacement) return { replacement, failedError: null };
+			if (replacement) return { disposition: 'replacement', submission: replacement };
 		}
 		if (state === 'continuable') {
 			const replacement = await submissions.replaceTurnJournalAttempt(attempt, crypto.randomUUID(), lease);
-			if (replacement) return { replacement, failedError: null };
+			if (replacement) return { disposition: 'replacement', submission: replacement };
 		}
 	}
 
@@ -409,16 +431,15 @@ export async function reconcileInterruptedSubmission(
 	if (submission.inputAppliedAt === undefined) {
 		if (state === 'absent') {
 			await submissions.requeueSubmissionBeforeInputApplied(attempt);
-			return { replacement: null, failedError: null };
+			return { disposition: 'requeued' };
 		}
 		const error = new Error(
 			'[flue] Agent submission attempt was interrupted after canonical input persistence but before the input-application marker was recorded. Provider replay was not attempted.',
 		);
-		const failed = await failInterruptedSubmission(
+		return failInterruptedSubmission(
 			submissions, submission, attempt, agent,
 			'interrupted_before_input_marker', error, createContext,
 		);
-		return { replacement: null, failedError: failed ? error : null };
 	}
 
 	// Collect interrupted tool metadata from the journal when available.
@@ -432,11 +453,10 @@ export async function reconcileInterruptedSubmission(
 			? `[flue] Agent submission was interrupted with pending tool call(s): ${interruptedTools.map((t) => t.name).join(', ')}. The tool outcome could not be confirmed. The tool was not automatically retried.`
 			: '[flue] Agent submission attempt was interrupted after input application without a completed canonical response. Provider replay was not attempted.',
 	);
-	const failed = await failInterruptedSubmission(
+	return failInterruptedSubmission(
 		submissions, submission, attempt, agent,
 		'interrupted_after_input_application', error, createContext, interruptedTools,
 	);
-	return { replacement: null, failedError: failed ? error : null };
 }
 
 /**
@@ -569,8 +589,13 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 
 	try {
 		const result = opts.wrapExecution ? await opts.wrapExecution(execute) : await execute();
-		const completed = await submissions.completeSubmission(attempt);
-		if (completed && submission.kind === 'direct') observers.complete(submission.submissionId, result);
+		await submissions.completeSubmission(attempt);
+		// Always notify the observer for direct submissions so the caller's
+		// completion promise resolves. When completeSubmission returns false
+		// (stale attempt, superseded by another claimant), the result is
+		// still the real response for this input — mirroring the fail path
+		// below, an unnotified observer would otherwise hang forever.
+		if (submission.kind === 'direct') observers.complete(submission.submissionId, result);
 	} catch (error) {
 		// During shutdown, the coordinator aborts active submissions at the
 		// turn boundary. Don't permanently settle the submission — leave it
@@ -605,7 +630,7 @@ async function failInterruptedSubmission(
 	error: Error,
 	createContext: (payload: unknown, dispatchId: string | undefined) => FlueContextInternal,
 	interruptedTools?: ReadonlyArray<{ readonly name: string; readonly id: string }>,
-): Promise<boolean> {
+): Promise<ReconciliationResult> {
 	const { input } = submission;
 	const payload = agentSubmissionPayload(input);
 	const dispatchId = agentSubmissionDispatchId(input);
@@ -631,7 +656,40 @@ async function failInterruptedSubmission(
 			terminalError,
 		);
 	}
-	return await submissions.failSubmission(attempt, error);
+	const settled = await submissions.failSubmission(attempt, error);
+	if (!settled) return { disposition: 'stale' };
+	emitSubmissionSettled(ctx, submission.submissionId, 'failed', error);
+	return { disposition: 'failed', error };
+}
+
+/**
+ * Durable settlement marker for reconciliation-driven outcomes. Normal
+ * processing leaves its own event trail; reconciliation settles work whose
+ * original process is gone, so detached stream readers would otherwise never
+ * learn the outcome. Best-effort: durable persistence rides the stream
+ * subscription the coordinator wired onto the context, and a delivery
+ * failure must never affect settlement itself.
+ */
+function emitSubmissionSettled(
+	ctx: FlueContextInternal,
+	submissionId: string,
+	outcome: 'completed' | 'failed',
+	error?: Error,
+): void {
+	try {
+		ctx.emitEvent({
+			type: 'submission_settled',
+			submissionId,
+			outcome,
+			...(error ? { error: error.message } : {}),
+		});
+	} catch (emitError) {
+		console.warn(
+			'[flue:submission-reconciliation] Failed to emit settlement event for submission',
+			submissionId,
+			emitError,
+		);
+	}
 }
 
 function submissionAttemptRef(submission: AgentSubmission): SubmissionAttemptRef | null {

@@ -400,17 +400,34 @@ export function createNodeAgentCoordinator(options: {
 				continue;
 			}
 			try {
-				const { replacement, failedError } = await reconcileInterruptedSubmission(
+				// Ensure the agent event stream exists (idempotent, normally
+				// created at first accepted processing) so a settlement event
+				// emitted during reconciliation lands durably even when the
+				// previous process died before creating it. Best-effort:
+				// settlement must never depend on event-stream plumbing.
+				await eventStreamStore
+					.createStream(agentStreamPath(submission.input.agent, submission.input.id))
+					.catch((error) => {
+						console.error('[flue:event-stream] createStream failed:', error);
+					});
+				const reconciled = await reconcileInterruptedSubmission(
 					submissions,
 					submission,
 					agent,
 					makeSubmissionContext(submission.input),
 					{ ownerId, leaseExpiresAt: Date.now() + LEASE_DURATION_MS },
 				);
-				if (replacement) {
-					spawnSubmissionTask(replacement);
-				} else if (failedError && submission.kind === 'direct') {
-					observers.fail(submission.submissionId, failedError);
+				if (reconciled.disposition === 'replacement') {
+					spawnSubmissionTask(reconciled.submission);
+				} else if (submission.kind === 'direct') {
+					// Observer resolution is best-effort and per-process: only
+					// a waiting caller attached in this process can be resolved
+					// here. Detached observers see the durable settlement event.
+					if (reconciled.disposition === 'completed') {
+						observers.complete(submission.submissionId, reconciled.result);
+					} else if (reconciled.disposition === 'failed') {
+						observers.fail(submission.submissionId, reconciled.error);
+					}
 				}
 			} catch (error) {
 				console.error(

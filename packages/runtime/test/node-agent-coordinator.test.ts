@@ -14,6 +14,7 @@ import { createFlueContext, resolveModel, type DispatchInput } from '../src/inte
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import { createNodeAgentCoordinator, createNodeDispatchQueue, type NodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import type { CreateContextFn } from '../src/runtime/handle-agent.ts';
+import { agentStreamPath } from '../src/runtime/event-stream-store.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import { createSessionStorageKey } from '../src/session-identity.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
@@ -1126,6 +1127,23 @@ leaseExpiresAt: 1,
 			}
 		});
 
+		it('resolves the waiting direct prompt with the real result when completion settlement loses the attempt CAS', async () => {
+			const dbPath = createTempDbPath();
+			const provider = createFauxProvider();
+			provider.setResponses([fauxAssistantMessage('Superseded but real reply.')]);
+			const { coordinator, executionStore } = await createFauxCoordinator(dbPath, provider);
+			// Simulate another claimant superseding this attempt between
+			// processing and settlement: the completion CAS reports a stale
+			// attempt. The caller's completion promise must still resolve with
+			// the real response instead of hanging forever.
+			executionStore.submissions.completeSubmission = async () => false;
+
+			const admit = coordinator.createAdmission('assistant', 'instance-1');
+			const result = await admit({ message: 'Hello superseded' });
+
+			expect(result).toMatchObject({ text: 'Superseded but real reply.' });
+		});
+
 		it('queues concurrent same-session direct prompts instead of rejecting', async () => {
 			const dbPath = createTempDbPath();
 			const provider = createFauxProvider();
@@ -1216,6 +1234,111 @@ leaseExpiresAt: 1,
 			const submission = await executionStore.submissions.getSubmission('direct-terminalized');
 			expect(submission).toMatchObject({ status: 'settled' });
 			expect(submission?.error).toBeDefined();
+		});
+
+		it('resolves a waiting direct prompt with the persisted result when reconciliation settles completed work', async () => {
+			const dbPath = createTempDbPath();
+			const provider = createFauxProvider();
+			provider.setResponses([fauxAssistantMessage('Should not be called.')]);
+			const executionStore = await openExecutionStore(dbPath);
+			const eventStreamStore = createTestEventStreamStore();
+			const coordinator = createNodeAgentCoordinator({
+				submissions: executionStore.submissions,
+				sessions: executionStore.sessions,
+				agents: {
+					assistant: createAgent(() => ({
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					})),
+				},
+				createContext: makeFauxCreateContext(provider, executionStore),
+				eventStreamStore,
+			});
+
+			// Simulate an attempt that checkpointed a completed canonical
+			// response and lost its lease before the settlement CAS: intercept
+			// admission to claim with an already-expired lease and persist the
+			// completed session, so this coordinator's expired-lease
+			// reconciliation — not normal processing — settles the submission
+			// while the caller is still awaiting completion.
+			const originalAdmit = executionStore.submissions.admitDirect.bind(executionStore.submissions);
+			executionStore.submissions.admitDirect = async (input) => {
+				const admitted = await originalAdmit(input);
+				await executionStore.submissions.claimSubmission({
+					submissionId: input.submissionId,
+					attemptId: 'attempt-lease-expired',
+					ownerId: 'previous-owner',
+					leaseExpiresAt: 1,
+				});
+				await executionStore.submissions.markSubmissionInputApplied({
+					submissionId: input.submissionId,
+					attemptId: 'attempt-lease-expired',
+				});
+				const storageKey = createSessionStorageKey('instance-1', 'default', 'default');
+				const now = new Date().toISOString();
+				await executionStore.sessions.save(storageKey, {
+					version: 6,
+					affinityKey: generateSessionAffinityKey(),
+					taskSessions: [],
+					entries: [
+						{
+							type: 'message',
+							id: 'e1',
+							parentId: null,
+							timestamp: now,
+							message: {
+								role: 'user',
+								content: [{ type: 'text', text: 'Hello reconciled' }],
+								timestamp: Date.now(),
+							} as any,
+							directSubmissionId: input.submissionId,
+						},
+						{
+							type: 'message',
+							id: 'e2',
+							parentId: 'e1',
+							timestamp: now,
+							message: {
+								role: 'assistant',
+								content: [{ type: 'text', text: 'Completed canonical response.' }],
+								stopReason: 'stop',
+								api: 'test',
+								provider: 'test',
+								model: 'test-model',
+								usage: {
+									input: 0,
+									output: 0,
+									totalTokens: 0,
+									cost: { input: 0, output: 0, total: 0 },
+								},
+								timestamp: Date.now(),
+							} as any,
+						},
+					],
+					leafId: 'e2',
+					metadata: {},
+					createdAt: now,
+					updatedAt: now,
+				});
+				return admitted;
+			};
+
+			const admit = coordinator.createAdmission('assistant', 'instance-1');
+			const result = await admit({ message: 'Hello reconciled' });
+
+			expect(result).toMatchObject({
+				text: 'Completed canonical response.',
+				model: { provider: 'test', id: 'test-model' },
+			});
+			expect(await executionStore.submissions.hasUnsettledSubmissions()).toBe(false);
+			// Reconciliation-driven settlement appends a durable event so
+			// detached stream readers also observe the outcome.
+			const stream = await eventStreamStore.readEvents(agentStreamPath('assistant', 'instance-1'));
+			const settledEvents = stream.events
+				.map((event) => event.data as Record<string, unknown>)
+				.filter((event) => event.type === 'submission_settled');
+			expect(settledEvents).toMatchObject([
+				{ outcome: 'completed', submissionId: expect.any(String) },
+			]);
 		});
 
 		it('silently recovers a direct prompt after restart with no attached observer', async () => {

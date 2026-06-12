@@ -701,6 +701,33 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		);
 	}
 
+	/**
+	 * Reconstruct the submission result from persisted history for a
+	 * submission whose canonical response completed but whose settlement was
+	 * interrupted. Mirrors the response shape of `processSubmissionInput`
+	 * (text/usage/model) without replaying any provider work, so
+	 * reconciliation can resolve a waiting observer with the real result.
+	 * Returns undefined when the input or a completed response is absent.
+	 */
+	reconstructSubmissionResult(input: AgentSubmissionInput): PromptResponse | undefined {
+		const inputEntry =
+			input.kind === 'dispatch'
+				? this.history.findDispatchInput(input.dispatchId)
+				: this.history.findDirectSubmissionInput(input.submissionId);
+		if (!inputEntry) return undefined;
+		const assistant = this.history
+			.getActivePathSince(inputEntry.id)
+			.findLast(
+				(entry): entry is MessageEntry => entry.type === 'message' && entry.message.role === 'assistant',
+			)?.message as AssistantMessage | undefined;
+		if (!assistant || !isCompletedAssistantResponse(assistant)) return undefined;
+		return {
+			text: assistant.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n'),
+			usage: this.aggregateUsageSince(inputEntry.id),
+			model: { provider: assistant.provider, id: assistant.model },
+		};
+	}
+
 	processSubmissionInput(
 		input: AgentSubmissionInput,
 		options?: ProcessAgentSubmissionOptions,

@@ -106,6 +106,9 @@ function makeRecoveryContext(options: {
 		inspectSubmissionInput() {
 			return options.inspection ?? 'uncertain';
 		},
+		reconstructSubmissionResult() {
+			return undefined;
+		},
 		async recordSubmissionTerminal(input: AgentSubmissionInterruption) {
 			options.events?.push('record-terminal');
 			terminalRecords.push(input);
@@ -118,6 +121,12 @@ function makeRecoveryContext(options: {
 					return session;
 				},
 			};
+		},
+		emitEvent(event: unknown) {
+			return event;
+		},
+		subscribeEvent() {
+			return () => {};
 		},
 	} as unknown as FlueContextInternal;
 	return { ctx, terminalRecords };

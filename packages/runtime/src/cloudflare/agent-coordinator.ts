@@ -266,6 +266,24 @@ class CloudflareAgentCoordinator {
 		});
 	}
 
+	/**
+	 * Create a context whose events are appended to the agent's durable event
+	 * stream. Used for both submission processing and reconciliation so events
+	 * emitted on either path (including reconciliation-driven settlement)
+	 * reach detached stream readers.
+	 */
+	private createDurableContext(payload: unknown, request: Request, dispatchId?: string): FlueContextInternal {
+		const ctx = this.createContext(payload, request, undefined, dispatchId);
+		const streamPath = agentStreamPath(this.agentName, this.instance.name);
+		ctx.subscribeEvent((event) => {
+			if (isStreamExcludedEvent(event)) return;
+			this.eventStreamStore.appendEvent(streamPath, event).catch((error) => {
+				console.error('[flue:event-stream] appendEvent failed:', error);
+			});
+		});
+		return ctx;
+	}
+
 	private assertAgentsDurabilityApi(method: 'runFiber' | 'schedule'): void {
 		if (typeof this.instance[method] !== 'function') {
 			throw new Error(
@@ -386,20 +404,37 @@ class CloudflareAgentCoordinator {
 	private async reconcileInterruptedSubmission(submission: AgentSubmission): Promise<void> {
 		const agent = this.options.createdAgents[this.agentName];
 		if (!agent) throw new Error('[flue] Agent target unavailable during durable reconciliation.');
-		const { replacement, failedError } = await this.runWithInstanceContext(() =>
+		// Ensure the agent event stream exists (idempotent, normally created
+		// at first accepted processing) so a settlement event emitted during
+		// reconciliation lands durably even when the previous incarnation
+		// died before creating it. Best-effort: settlement must never depend
+		// on event-stream plumbing.
+		await Promise.resolve(this.eventStreamStore.createStream(agentStreamPath(this.agentName, this.instance.name))).catch(
+			(error) => {
+				console.error('[flue:event-stream] createStream failed:', error);
+			},
+		);
+		const reconciled = await this.runWithInstanceContext(() =>
 			reconcileInterruptedSubmission(
 				this.submissions,
 				submission,
 				agent,
 				(payload, dispatchId) =>
-					this.createContext(payload, submissionSyntheticRequest(submission.input), undefined, dispatchId),
+					this.createDurableContext(payload, submissionSyntheticRequest(submission.input), dispatchId),
 				{ ownerId: this.instance.ctx.id.toString(), leaseExpiresAt: 0 },
 			),
 		);
-		if (replacement) {
-			await this.startSubmissionAttempt(replacement);
-		} else if (failedError && submission.kind === 'direct') {
-			this.observers.fail(submission.submissionId, failedError);
+		if (reconciled.disposition === 'replacement') {
+			await this.startSubmissionAttempt(reconciled.submission);
+		} else if (submission.kind === 'direct') {
+			// Observer resolution is best-effort and per-process: only a
+			// waiting caller attached in this process can be resolved here.
+			// Detached observers see the durable settlement event.
+			if (reconciled.disposition === 'completed') {
+				this.observers.complete(submission.submissionId, reconciled.result);
+			} else if (reconciled.disposition === 'failed') {
+				this.observers.fail(submission.submissionId, reconciled.error);
+			}
 		}
 	}
 
@@ -483,10 +518,9 @@ class CloudflareAgentCoordinator {
 	}
 
 	private async processSubmissionEntry(submission: AgentSubmission): Promise<void> {
-		const eventStreamStore = this.eventStreamStore;
 		// Ensure the agent event stream exists before processing. createStream
 		// is idempotent — safe to call on every submission.
-		await eventStreamStore.createStream(agentStreamPath(this.agentName, this.instance.name));
+		await this.eventStreamStore.createStream(agentStreamPath(this.agentName, this.instance.name));
 		await processSubmission({
 			submissions: this.submissions,
 			submission,
@@ -495,17 +529,8 @@ class CloudflareAgentCoordinator {
 				if (!agent) throw new Error('[flue] Agent target unavailable during durable processing.');
 				return agent;
 			},
-			createContext: (payload, dispatchId) => {
-				const ctx = this.createContext(payload, submissionSyntheticRequest(submission.input), undefined, dispatchId);
-				const streamPath = agentStreamPath(this.agentName, this.instance.name);
-				ctx.subscribeEvent((event) => {
-					if (isStreamExcludedEvent(event)) return;
-					eventStreamStore.appendEvent(streamPath, event).catch((error) => {
-						console.error('[flue:event-stream] appendEvent failed:', error);
-					});
-				});
-				return ctx;
-			},
+			createContext: (payload, dispatchId) =>
+				this.createDurableContext(payload, submissionSyntheticRequest(submission.input), dispatchId),
 			observers: this.observers,
 			wrapExecution: (fn) => this.runWithInstanceContext(fn),
 			onSettled: () => {
