@@ -62,7 +62,12 @@ describe('createDiscordChannel()', () => {
 			type: 'command',
 			id: 'I1',
 			applicationId: 'A1',
-			token: 'interaction-token',
+			user: { id: 'U1' },
+			context: 0,
+			locale: 'en-US',
+			guildLocale: 'en-GB',
+			authorizingIntegrationOwners: { guildId: 'G1' },
+			capabilities: { token: 'interaction-token' },
 			destination: {
 				type: 'guild',
 				guildId: 'G1',
@@ -70,6 +75,7 @@ describe('createDiscordChannel()', () => {
 				channelKind: 'channel',
 			},
 			data: {
+				commandType: 1,
 				name: 'ask',
 				options: [{ name: 'question', value: 'hello' }],
 			},
@@ -77,13 +83,106 @@ describe('createDiscordChannel()', () => {
 		});
 	});
 
-	it('normalizes component and modal interactions through the same callback', async () => {
+	it('normalizes every application command type and autocomplete', async () => {
+		const seen: unknown[] = [];
+		const discord = createDiscordChannel({
+			publicKey,
+			applicationId: 'A1',
+			interactions({ interaction }) {
+				seen.push(interaction);
+				return interaction.type === 'autocomplete'
+					? { type: 8, data: { choices: [] } }
+					: { type: 4 };
+			},
+		});
+		const app = channelApp(discord);
+
+		const userCommand = await app.request(
+			await signedRequest(
+				commandInteraction({
+					data: {
+						type: 2,
+						name: 'inspect-user',
+						target_id: 'U2',
+						resolved: { users: { U2: { id: 'U2' } } },
+					},
+				}),
+			),
+		);
+		const messageCommand = await app.request(
+			await signedRequest(
+				commandInteraction({
+					data: {
+						type: 3,
+						name: 'inspect-message',
+						target_id: 'M1',
+						resolved: { messages: { M1: { id: 'M1' } } },
+					},
+				}),
+			),
+		);
+		const entryPoint = await app.request(
+			await signedRequest(
+				commandInteraction({
+					data: { type: 4, name: 'launch' },
+				}),
+			),
+		);
+		const autocomplete = await app.request(
+			await signedRequest(
+				commandInteraction({
+					type: 4,
+					data: {
+						type: 1,
+						name: 'ask',
+						options: [{ type: 3, name: 'topic', value: 'flu', focused: true }],
+					},
+				}),
+			),
+		);
+
+		expect([
+			userCommand.status,
+			messageCommand.status,
+			entryPoint.status,
+			autocomplete.status,
+		]).toEqual([200, 200, 200, 200]);
+		expect(seen).toEqual([
+			expect.objectContaining({
+				type: 'command',
+				data: expect.objectContaining({
+					commandType: 2,
+					targetId: 'U2',
+					resolved: { users: { U2: { id: 'U2' } } },
+				}),
+			}),
+			expect.objectContaining({
+				type: 'command',
+				data: expect.objectContaining({ commandType: 3, targetId: 'M1' }),
+			}),
+			expect.objectContaining({
+				type: 'command',
+				data: { commandType: 4, name: 'launch', options: [] },
+			}),
+			expect.objectContaining({
+				type: 'autocomplete',
+				data: {
+					name: 'ask',
+					options: [{ type: 3, name: 'topic', value: 'flu', focused: true }],
+				},
+			}),
+		]);
+	});
+
+	it('normalizes component and destination-free modal interactions through the same callback', async () => {
 		const seen: string[] = [];
+		const modals: unknown[] = [];
 		const discord = createDiscordChannel({
 			publicKey,
 			applicationId: 'A1',
 			interactions({ interaction }) {
 				seen.push(interaction.type);
+				if (interaction.type === 'modal') modals.push(interaction);
 				return { type: 4, data: { content: 'ok' } };
 			},
 		});
@@ -93,7 +192,8 @@ describe('createDiscordChannel()', () => {
 			await signedRequest(
 				commandInteraction({
 					type: 3,
-					data: { custom_id: 'approve', component_type: 2, values: ['yes'] },
+					data: { custom_id: 'approve', component_type: 3, values: ['yes'] },
+					message: { id: 'M1', content: 'Approve?' },
 				}),
 			),
 		);
@@ -101,9 +201,30 @@ describe('createDiscordChannel()', () => {
 			await signedRequest(
 				commandInteraction({
 					type: 5,
+					guild_id: undefined,
+					context: undefined,
+					channel_id: undefined,
+					channel: undefined,
 					data: {
 						custom_id: 'approval',
-						components: [{ type: 4, custom_id: 'reason', value: 'because' }],
+						components: [
+							{
+								type: 1,
+								components: [{ type: 4, custom_id: 'reason', value: 'because' }],
+							},
+							{
+								type: 18,
+								component: {
+									type: 6,
+									custom_id: 'reviewers',
+									values: ['U2', 'U3'],
+								},
+							},
+							{
+								type: 18,
+								component: { type: 23, custom_id: 'notify', value: true },
+							},
+						],
 					},
 				}),
 			),
@@ -112,6 +233,17 @@ describe('createDiscordChannel()', () => {
 		expect(component.status).toBe(200);
 		expect(modal.status).toBe(200);
 		expect(seen).toEqual(['component', 'modal']);
+		expect((modals[0] as { destination?: unknown }).destination).toBeUndefined();
+		expect(modals[0]).toMatchObject({
+			type: 'modal',
+			data: {
+				fields: [
+					{ type: 4, customId: 'reason', value: 'because' },
+					{ type: 6, customId: 'reviewers', values: ['U2', 'U3'] },
+					{ type: 23, customId: 'notify', value: true },
+				],
+			},
+		});
 	});
 
 	it('forwards unsupported verified interaction types as unknown', async () => {
@@ -188,7 +320,7 @@ describe('createDiscordChannel()', () => {
 		expect(interactions).not.toHaveBeenCalled();
 	});
 
-	it('classifies guild threads and bot DMs while rejecting unsupported destinations', async () => {
+	it('classifies guild, bot-DM, and private-channel destinations', async () => {
 		const destinations: unknown[] = [];
 		const discord = createDiscordChannel({
 			publicKey,
@@ -222,7 +354,7 @@ describe('createDiscordChannel()', () => {
 			await signedRequest(
 				commandInteraction({
 					guild_id: undefined,
-					context: 1,
+					context: 2,
 					channel_id: 'D2',
 					channel: { id: 'D2', type: 3 },
 				}),
@@ -231,11 +363,42 @@ describe('createDiscordChannel()', () => {
 
 		expect(thread.status).toBe(200);
 		expect(dm.status).toBe(200);
-		expect(groupDm.status).toBe(400);
+		expect(groupDm.status).toBe(200);
 		expect(destinations).toEqual([
 			{ type: 'guild', guildId: 'G1', channelId: 'T1', channelKind: 'thread' },
 			{ type: 'dm', channelId: 'D1' },
+			{ type: 'private', channelId: 'D2' },
 		]);
+	});
+
+	it('rejects contradictory invocation identity before calling the handler', async () => {
+		const interactions = vi.fn((_input: unknown) => ({ type: 4 }));
+		const discord = createDiscordChannel({ publicKey, applicationId: 'A1', interactions });
+		const app = channelApp(discord);
+
+		const mismatchedChannel = await app.request(
+			await signedRequest(
+				commandInteraction({
+					channel_id: 'C1',
+					channel: { id: 'C2', type: 0 },
+				}),
+			),
+		);
+		const mismatchedContext = await app.request(
+			await signedRequest(commandInteraction({ context: 2 })),
+		);
+		const mismatchedUser = await app.request(
+			await signedRequest(
+				commandInteraction({
+					user: { id: 'U2' },
+				}),
+			),
+		);
+
+		expect([mismatchedChannel.status, mismatchedContext.status, mismatchedUser.status]).toEqual([
+			400, 400, 400,
+		]);
+		expect(interactions).not.toHaveBeenCalled();
 	});
 
 	it('round-trips canonical destination references', () => {
@@ -253,6 +416,9 @@ describe('createDiscordChannel()', () => {
 		const key = discord.conversationKey(ref);
 
 		expect(discord.parseConversationKey(key)).toEqual(ref);
+		expect(
+			discord.parseConversationKey(discord.conversationKey({ type: 'private', channelId: 'P:1' })),
+		).toEqual({ type: 'private', channelId: 'P:1' });
 		expect(() => discord.parseConversationKey(`slack:${key}`)).toThrow(
 			InvalidDiscordConversationKeyError,
 		);
@@ -275,6 +441,10 @@ function commandInteraction(overrides: Record<string, unknown> = {}): Record<str
 		context: 0,
 		channel_id: 'C1',
 		channel: { id: 'C1', type: 0 },
+		member: { user: { id: 'U1' } },
+		locale: 'en-US',
+		guild_locale: 'en-GB',
+		authorizing_integration_owners: { 0: 'G1' },
 		data: { type: 1, name: 'ask', options: [] },
 		...overrides,
 	};

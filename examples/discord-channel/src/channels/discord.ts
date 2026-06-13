@@ -1,7 +1,7 @@
 import { REST } from '@discordjs/rest';
 import { createDiscordChannel, type DiscordDestinationRef } from '@flue/discord';
 import { defineTool, dispatch } from '@flue/runtime';
-import { InteractionResponseType, Routes } from 'discord-api-types/v10';
+import type { APIInteractionResponse } from 'discord-api-types/v10';
 import assistant from '../agents/assistant.ts';
 
 export const client = new REST({ version: '10' }).setToken(requiredEnv('DISCORD_BOT_TOKEN'));
@@ -12,11 +12,16 @@ export const channel = createDiscordChannel({
 
 	// Path: /channels/discord/interactions
 	async interactions({ interaction }) {
-		if (interaction.type !== 'command' || interaction.data.name !== 'ask') {
+		if (
+			interaction.type !== 'command' ||
+			interaction.data.name !== 'ask' ||
+			!interaction.destination ||
+			interaction.destination.type === 'private'
+		) {
 			return {
-				type: InteractionResponseType.ChannelMessageWithSource,
+				type: 4,
 				data: { content: 'Unsupported interaction.', flags: 64 },
-			};
+			} satisfies APIInteractionResponse;
 		}
 
 		const destination: DiscordDestinationRef = interaction.destination;
@@ -29,9 +34,9 @@ export const channel = createDiscordChannel({
 			},
 		});
 		return {
-			type: InteractionResponseType.ChannelMessageWithSource,
+			type: 4,
 			data: { content: 'Your request was accepted.', flags: 64 },
-		};
+		} satisfies APIInteractionResponse;
 	},
 });
 
@@ -48,7 +53,7 @@ export function postMessage(ref: DiscordDestinationRef) {
 			additionalProperties: false,
 		},
 		async execute({ content }) {
-			const result = (await client.post(Routes.channelMessages(ref.channelId), {
+			const result = (await client.post(`/channels/${ref.channelId}/messages`, {
 				body: { content },
 			})) as { id?: string };
 			return JSON.stringify({ messageId: result.id });

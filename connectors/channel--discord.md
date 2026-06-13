@@ -31,7 +31,7 @@ name, dispatched input, and immediate response:
 import { REST } from '@discordjs/rest';
 import { createDiscordChannel } from '@flue/discord';
 import { defineTool, dispatch } from '@flue/runtime';
-import { InteractionResponseType, Routes } from 'discord-api-types/v10';
+import type { APIInteractionResponse } from 'discord-api-types/v10';
 import assistant from '../agents/assistant.ts';
 
 export const client = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN!);
@@ -42,11 +42,16 @@ export const channel = createDiscordChannel({
 
   // Path: /channels/discord/interactions
   async interactions({ interaction }) {
-    if (interaction.type !== 'command' || interaction.data.name !== 'ask') {
+    if (
+      interaction.type !== 'command' ||
+      interaction.data.name !== 'ask' ||
+      !interaction.destination ||
+      interaction.destination.type === 'private'
+    ) {
       return {
-        type: InteractionResponseType.ChannelMessageWithSource,
+        type: 4,
         data: { content: 'Unsupported interaction.', flags: 64 },
-      };
+      } satisfies APIInteractionResponse;
     }
 
     await dispatch(assistant, {
@@ -58,9 +63,9 @@ export const channel = createDiscordChannel({
       },
     });
     return {
-      type: InteractionResponseType.ChannelMessageWithSource,
+      type: 4,
       data: { content: 'Your request was accepted.', flags: 64 },
-    };
+    } satisfies APIInteractionResponse;
   },
 });
 
@@ -75,7 +80,7 @@ export function postMessage(ref: { channelId: string }) {
       additionalProperties: false,
     },
     async execute({ content }) {
-      const result = (await client.post(Routes.channelMessages(ref.channelId), {
+      const result = (await client.post(`/channels/${ref.channelId}/messages`, {
         body: { content },
       })) as { id?: string };
       return JSON.stringify({ messageId: result.id });
@@ -86,12 +91,15 @@ export function postMessage(ref: { channelId: string }) {
 
 Discord interactions require a provider response; do not rely on an empty
 acknowledgement. PING/PONG is handled by `@flue/discord`. Keep interaction
-tokens and raw payloads out of dispatched input and tools.
+capabilities and raw payloads out of dispatched input and tools. Some valid
+interactions have no durable destination, and private-channel interactions
+cannot be used as arbitrary bot-token message destinations.
 
-For Cloudflare, configure `REST` with its documented custom `makeRequest`
-option backed by global `fetch`, follow the project's Worker secret binding
-convention, and verify the actual Worker build. Do not expose arbitrary channel
-ids, routes, or bot tokens to the model.
+The package-root `@discordjs/rest` import selects its Fetch-based web export in
+Cloudflare Workers. Keep `discord-api-types` imports type-only so the Worker
+bundle does not depend on its runtime route helpers. Follow the project's
+Worker secret binding convention and verify the actual Worker build. Do not
+expose arbitrary channel ids, routes, or bot tokens to the model.
 
 ## Wire the agent
 

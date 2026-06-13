@@ -21,7 +21,7 @@ describe('@flue/discord workerd ingress', () => {
 		const app = new Hono();
 		for (const route of discord.routes) app.on(route.method, route.path, route.handler);
 		const timestamp = '1717971234';
-		const body = ` {\n "type":2,"id":"I1","application_id":"A1","token":"interaction-token",\n "guild_id":"G1","context":0,"channel_id":"C1","channel":{"id":"C1","type":0},\n "data":{"type":1,"name":"ask","options":[{"value":"café"}]}\n} `;
+		const body = ` {\n "type":2,"id":"I1","application_id":"A1","token":"interaction-token",\n "guild_id":"G1","context":0,"channel_id":"C1","channel":{"id":"C1","type":0},\n "member":{"user":{"id":"U1"}},"locale":"en-US","authorizing_integration_owners":{"0":"G1"},\n "data":{"type":1,"name":"ask","options":[{"value":"café"}]}\n} `;
 		const signature = await sign(keyPair.privateKey, timestamp, body);
 		const headers = {
 			'content-type': 'application/json',

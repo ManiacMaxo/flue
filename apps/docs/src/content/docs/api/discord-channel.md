@@ -73,21 +73,30 @@ the `flue()` mount.
 ```ts
 type DiscordInteraction =
   | DiscordCommandInteraction
+  | DiscordAutocompleteInteraction
   | DiscordComponentInteraction
   | DiscordModalInteraction
   | DiscordUnknownInteraction;
 ```
 
-Known variants use `type: 'command'`, `type: 'component'`, or `type: 'modal'`.
-Each exposes:
+Known variants use `type: 'command'`, `type: 'autocomplete'`,
+`type: 'component'`, or `type: 'modal'`. Each exposes:
 
 ```ts
 interface DiscordInteractionEnvelope<TType extends string, TData> {
   type: TType;
   id: string;
   applicationId: string;
-  token: string;
-  destination: DiscordDestinationRef;
+  user: { id: string };
+  context?: number;
+  destination?: DiscordDestinationRef;
+  locale?: string;
+  guildLocale?: string;
+  authorizingIntegrationOwners?: {
+    guildId?: string;
+    userId?: string;
+  };
+  capabilities: { token: string };
   data: TData;
   raw: unknown;
 }
@@ -97,8 +106,13 @@ Unsupported verified interaction types use `type: 'unknown'` and retain the
 numeric `interactionType`. PING is handled internally and returns PONG without
 invoking `interactions`.
 
-`token` and `raw` may contain sensitive provider capabilities. Keep them out of
-dispatched input, model context, logs, and durable history.
+`capabilities` and `raw` may contain the short-lived interaction token. Keep
+them out of dispatched input, model context, logs, and durable history.
+
+Command data includes the numeric application-command type, name, options, and
+optional target or resolved data. Autocomplete preserves the provider options.
+Component data includes the originating message. Modal data includes flattened
+scalar or list field values in addition to the provider component tree.
 
 ## Identity
 
@@ -113,9 +127,15 @@ type DiscordDestinationRef =
   | {
       type: 'dm';
       channelId: string;
+    }
+  | {
+      type: 'private';
+      channelId: string;
     };
 ```
 
+Discord may omit channel context for valid interactions, so `destination` is
+optional. Private-channel identity does not grant bot-token posting access.
 Conversation keys are canonical identifiers, not authorization capabilities.
 
 ## Errors

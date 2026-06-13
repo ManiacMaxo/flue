@@ -31,50 +31,92 @@ export interface DiscordChannelOptions<E extends Env = Env> {
 	interactions(input: DiscordInteractionsHandlerInput<E>): DiscordHandlerResult;
 }
 
-/** Supported guild-channel, guild-thread, or bot-DM destination. */
+/** Stable Discord destination when an interaction supplies channel identity. */
 export type DiscordDestinationRef =
 	| { type: 'guild'; guildId: string; channelId: string; channelKind: 'channel' | 'thread' }
-	| { type: 'dm'; channelId: string };
+	| { type: 'dm'; channelId: string }
+	| { type: 'private'; channelId: string };
+
+/** User who invoked a verified interaction. */
+export interface DiscordUserRef {
+	id: string;
+}
+
+/** Installation identities that authorized an interaction. */
+export interface DiscordAuthorizingIntegrationOwners {
+	guildId?: string;
+	userId?: string;
+}
+
+/**
+ * Short-lived capability for interaction callbacks and follow-up messages.
+ *
+ * Never place this value in model context, dispatch input, logs, or durable
+ * session data.
+ */
+export interface DiscordInteractionCapabilities {
+	token: string;
+}
 
 export interface DiscordCommandData {
+	/** Discord application-command type. */
+	commandType: number;
 	name: string;
 	options: readonly unknown[];
+	targetId?: string;
+	resolved?: unknown;
+}
+
+export interface DiscordAutocompleteData {
+	name: string;
+	options: readonly unknown[];
+	resolved?: unknown;
 }
 
 export interface DiscordComponentData {
 	customId: string;
 	componentType: number;
 	values?: readonly string[];
+	resolved?: unknown;
+	message: unknown;
 }
 
 export interface DiscordModalData {
 	customId: string;
 	components: readonly unknown[];
 	fields: readonly DiscordModalField[];
+	resolved?: unknown;
 }
 
 export interface DiscordModalField {
 	customId: string;
 	type: number;
-	value?: string;
+	value?: string | boolean | null;
+	values?: readonly string[];
 }
 
 export interface DiscordInteractionEnvelope<TType extends string, TData> {
 	type: TType;
 	id: string;
 	applicationId: string;
-	/**
-	 * Sensitive interaction capability. Keep it out of dispatch input, model
-	 * context, logs, and durable session data.
-	 */
-	token: string;
-	destination: DiscordDestinationRef;
+	user: DiscordUserRef;
+	/** Discord interaction-context type when supplied by the provider. */
+	context?: number;
+	destination?: DiscordDestinationRef;
+	locale?: string;
+	guildLocale?: string;
+	authorizingIntegrationOwners?: DiscordAuthorizingIntegrationOwners;
+	capabilities: DiscordInteractionCapabilities;
 	data: TData;
 	/** Complete parsed payload. It may contain sensitive provider capabilities. */
 	raw: unknown;
 }
 
 export type DiscordCommandInteraction = DiscordInteractionEnvelope<'command', DiscordCommandData>;
+export type DiscordAutocompleteInteraction = DiscordInteractionEnvelope<
+	'autocomplete',
+	DiscordAutocompleteData
+>;
 export type DiscordComponentInteraction = DiscordInteractionEnvelope<
 	'component',
 	DiscordComponentData
@@ -86,13 +128,19 @@ export interface DiscordUnknownInteraction {
 	interactionType: number;
 	id: string;
 	applicationId: string;
-	token: string;
-	destination: DiscordDestinationRef;
+	user: DiscordUserRef;
+	context?: number;
+	destination?: DiscordDestinationRef;
+	locale?: string;
+	guildLocale?: string;
+	authorizingIntegrationOwners?: DiscordAuthorizingIntegrationOwners;
+	capabilities: DiscordInteractionCapabilities;
 	raw: unknown;
 }
 
 export type DiscordInteraction =
 	| DiscordCommandInteraction
+	| DiscordAutocompleteInteraction
 	| DiscordComponentInteraction
 	| DiscordModalInteraction
 	| DiscordUnknownInteraction;
@@ -154,7 +202,7 @@ export function createDiscordChannel<E extends Env = Env>(
 			if (ref.type === 'guild') {
 				return `discord:v1:guild:${encodeURIComponent(ref.guildId)}:${ref.channelKind}:${encodeURIComponent(ref.channelId)}`;
 			}
-			return `discord:v1:dm:${encodeURIComponent(ref.channelId)}`;
+			return `discord:v1:${ref.type}:${encodeURIComponent(ref.channelId)}`;
 		},
 		parseConversationKey(id) {
 			try {
@@ -173,11 +221,15 @@ export function createDiscordChannel<E extends Env = Env>(
 					if (channel.conversationKey(ref) !== id) throw new InvalidDiscordConversationKeyError();
 					return ref;
 				}
-				const dmChannelId = /^discord:v1:dm:([^:]+)$/.exec(id)?.[1];
-				if (!dmChannelId) throw new InvalidDiscordConversationKeyError();
+				const direct = /^discord:v1:(dm|private):([^:]+)$/.exec(id);
+				const type = direct?.[1];
+				const directChannelId = direct?.[2];
+				if ((type !== 'dm' && type !== 'private') || !directChannelId) {
+					throw new InvalidDiscordConversationKeyError();
+				}
 				const ref: DiscordDestinationRef = {
-					type: 'dm',
-					channelId: decodeURIComponent(dmChannelId),
+					type,
+					channelId: decodeURIComponent(directChannelId),
 				};
 				assertDestinationRef(ref);
 				if (channel.conversationKey(ref) !== id) throw new InvalidDiscordConversationKeyError();
@@ -214,7 +266,9 @@ function assertDestinationRef(ref: DiscordDestinationRef): void {
 		}
 		return;
 	}
-	if (ref.type !== 'dm') throw new InvalidDiscordInputError('destination type');
+	if (ref.type !== 'dm' && ref.type !== 'private') {
+		throw new InvalidDiscordInputError('destination type');
+	}
 }
 
 function assertIdentifier(value: unknown, field: string): asserts value is string {

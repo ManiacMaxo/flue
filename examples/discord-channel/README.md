@@ -19,8 +19,15 @@ callback and agent initializer, after module evaluation.
 
 Conversation keys validate syntax, not authorization. This agent is intentionally dispatch-only. Any direct agent route must independently authorize the caller-selected instance id before deriving outbound tools from it.
 
-The example supports guild channels, guild threads, and bot DMs. A bot-token
-post is a new ordinary message, not an interaction follow-up or an ephemeral
-response. Discord Gateway events and deferred interaction-token replies remain
+The example dispatches only interactions with guild or bot-DM destinations.
+Valid modal submissions may omit a destination, and private-channel
+interactions cannot be used as arbitrary bot-token message destinations. A
+bot-token post is a new ordinary message, not an interaction follow-up or an
+ephemeral response.
+
+The package-root `@discordjs/rest` import selects its Fetch-based web build in
+Cloudflare Workers. `discord-api-types` remains type-only in the Worker-facing
+module so the Worker bundle does not depend on its runtime route helpers.
+Discord Gateway events and deferred interaction-token replies remain
 application concerns. A public HTTPS tunnel is required for local webhook
 development.

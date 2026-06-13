@@ -1,5 +1,7 @@
 import type { Context, Env, Handler } from 'hono';
 import type {
+	DiscordAutocompleteData,
+	DiscordAuthorizingIntegrationOwners,
 	DiscordCommandData,
 	DiscordComponentData,
 	DiscordDestinationRef,
@@ -13,7 +15,6 @@ import type {
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
 const DEFAULT_HANDLER_TIMEOUT_MS = 2_500;
-const GUILD_CHANNEL_TYPES = new Set([0, 5]);
 const THREAD_CHANNEL_TYPES = new Set([10, 11, 12]);
 const encoder = new TextEncoder();
 
@@ -91,6 +92,10 @@ export function createDiscordInteractionsHandler<E extends Env>(
 			const data = normalizeComponentData(raw);
 			if (!data) return response(400);
 			interaction = { ...common, type: 'component', data, raw };
+		} else if (type === 4) {
+			const data = normalizeAutocompleteData(raw);
+			if (!data) return response(400);
+			interaction = { ...common, type: 'autocomplete', data, raw };
 		} else if (type === 5) {
 			const data = normalizeModalData(raw);
 			if (!data) return response(400);
@@ -116,54 +121,134 @@ function normalizeCommon(
 ): Omit<DiscordInteractionEnvelope<string, never>, 'type' | 'data' | 'raw'> | undefined {
 	const id = readString(raw, 'id');
 	const token = readString(raw, 'token');
+	const user = normalizeUser(raw);
 	const destination = normalizeDestination(raw);
-	if (!id || !token || !destination) return undefined;
-	return { id, applicationId, token, destination };
+	const context = readInteger(raw, 'context');
+	const locale = readAnyString(raw, 'locale');
+	const guildLocale = readAnyString(raw, 'guild_locale');
+	const authorizingIntegrationOwners = normalizeAuthorizingIntegrationOwners(raw);
+	if (!id || !token || !user || destination === null || authorizingIntegrationOwners === null) {
+		return undefined;
+	}
+	return {
+		id,
+		applicationId,
+		user,
+		...(context === undefined ? {} : { context }),
+		...(destination === undefined ? {} : { destination }),
+		...(locale === undefined ? {} : { locale }),
+		...(guildLocale === undefined ? {} : { guildLocale }),
+		...(authorizingIntegrationOwners === undefined ? {} : { authorizingIntegrationOwners }),
+		capabilities: { token },
+	};
 }
 
-function normalizeDestination(raw: Record<string, unknown>): DiscordDestinationRef | undefined {
+function normalizeUser(raw: Record<string, unknown>): { id: string } | undefined {
+	const member = readRecord(raw, 'member');
+	const memberUser = member && readRecord(member, 'user');
+	const directUser = readRecord(raw, 'user');
+	const memberUserId = memberUser && readString(memberUser, 'id');
+	const directUserId = directUser && readString(directUser, 'id');
+	if (memberUserId && directUserId && memberUserId !== directUserId) return undefined;
+	const id = memberUserId ?? directUserId;
+	return id ? { id } : undefined;
+}
+
+function normalizeAuthorizingIntegrationOwners(
+	raw: Record<string, unknown>,
+): DiscordAuthorizingIntegrationOwners | undefined | null {
+	const owners = raw.authorizing_integration_owners;
+	if (owners === undefined) return undefined;
+	if (!isRecord(owners)) return null;
+	const guildId = readAnyString(owners, '0');
+	const userId = readAnyString(owners, '1');
+	if (
+		(owners['0'] !== undefined && guildId === undefined) ||
+		(owners['1'] !== undefined && userId === undefined)
+	) {
+		return null;
+	}
+	return {
+		...(guildId === undefined ? {} : { guildId }),
+		...(userId === undefined ? {} : { userId }),
+	};
+}
+
+function normalizeDestination(
+	raw: Record<string, unknown>,
+): DiscordDestinationRef | undefined | null {
 	const channelId = readString(raw, 'channel_id');
 	const guildId = readOptionalString(raw, 'guild_id');
 	const context = readInteger(raw, 'context');
 	const channel = readRecord(raw, 'channel');
 	const channelType = channel && readInteger(channel, 'type');
 	const nestedChannelId = channel && readString(channel, 'id');
-	if (!channelId || !nestedChannelId || nestedChannelId !== channelId) return undefined;
+	if (channel !== undefined && (!nestedChannelId || channelType === undefined)) return null;
+	if (channelId && nestedChannelId && nestedChannelId !== channelId) return null;
+	const resolvedChannelId = nestedChannelId ?? channelId;
 
 	if (guildId) {
-		if (context !== undefined && context !== 0) return undefined;
-		if (channelType === undefined) return undefined;
-		if (!GUILD_CHANNEL_TYPES.has(channelType) && !THREAD_CHANNEL_TYPES.has(channelType)) {
-			return undefined;
-		}
+		if (context !== undefined && context !== 0) return null;
+		if (!resolvedChannelId || channelType === undefined) return undefined;
 		return {
 			type: 'guild',
 			guildId,
-			channelId,
+			channelId: resolvedChannelId,
 			channelKind: THREAD_CHANNEL_TYPES.has(channelType) ? 'thread' : 'channel',
 		};
 	}
 
-	if (context !== undefined && context !== 1) return undefined;
-	if (channelType !== 1) return undefined;
-	return { type: 'dm', channelId };
+	if (context === 0) return null;
+	if (!resolvedChannelId) return undefined;
+	if (context === 2 || (context === undefined && channelType === 3)) {
+		return { type: 'private', channelId: resolvedChannelId };
+	}
+	if (context === 1 || (context === undefined && channelType === 1)) {
+		return { type: 'dm', channelId: resolvedChannelId };
+	}
+	return undefined;
 }
 
 function normalizeCommandData(raw: Record<string, unknown>): DiscordCommandData | undefined {
 	const data = readRecord(raw, 'data');
 	const name = data && readString(data, 'name');
 	const commandType = data && readInteger(data, 'type');
-	if (!data || !name || commandType !== 1) return undefined;
+	if (!data || !name || commandType === undefined) return undefined;
 	const options = data.options;
 	if (options !== undefined && !Array.isArray(options)) return undefined;
-	return { name, options: options ?? [] };
+	const targetId = readAnyString(data, 'target_id');
+	const resolved = data.resolved;
+	return {
+		commandType,
+		name,
+		options: options ?? [],
+		...(targetId === undefined ? {} : { targetId }),
+		...(resolved === undefined ? {} : { resolved }),
+	};
+}
+
+function normalizeAutocompleteData(
+	raw: Record<string, unknown>,
+): DiscordAutocompleteData | undefined {
+	const data = readRecord(raw, 'data');
+	const name = data && readString(data, 'name');
+	const commandType = data && readInteger(data, 'type');
+	const options = data?.options;
+	if (!data || !name || commandType !== 1 || !Array.isArray(options)) return undefined;
+	const resolved = data.resolved;
+	return {
+		name,
+		options,
+		...(resolved === undefined ? {} : { resolved }),
+	};
 }
 
 function normalizeComponentData(raw: Record<string, unknown>): DiscordComponentData | undefined {
 	const data = readRecord(raw, 'data');
 	const customId = data && readString(data, 'custom_id');
 	const componentType = data && readInteger(data, 'component_type');
-	if (!data || !customId || componentType === undefined) return undefined;
+	const message = raw.message;
+	if (!data || !customId || componentType === undefined || !isRecord(message)) return undefined;
 	const values = data.values;
 	if (
 		values !== undefined &&
@@ -171,7 +256,14 @@ function normalizeComponentData(raw: Record<string, unknown>): DiscordComponentD
 	) {
 		return undefined;
 	}
-	return { customId, componentType, ...(values === undefined ? {} : { values }) };
+	const resolved = data.resolved;
+	return {
+		customId,
+		componentType,
+		...(values === undefined ? {} : { values }),
+		...(resolved === undefined ? {} : { resolved }),
+		message,
+	};
 }
 
 function normalizeModalData(raw: Record<string, unknown>): DiscordModalData | undefined {
@@ -179,28 +271,66 @@ function normalizeModalData(raw: Record<string, unknown>): DiscordModalData | un
 	const customId = data && readString(data, 'custom_id');
 	const components = data?.components;
 	if (!data || !customId || !Array.isArray(components)) return undefined;
-	return { customId, components, fields: collectModalFields(components) };
+	const resolved = data.resolved;
+	return {
+		customId,
+		components,
+		fields: collectModalFields(components),
+		...(resolved === undefined ? {} : { resolved }),
+	};
 }
 
 function collectModalFields(components: readonly unknown[]): Array<{
 	customId: string;
 	type: number;
-	value?: string;
+	value?: string | boolean | null;
+	values?: readonly string[];
 }> {
-	const fields: Array<{ customId: string; type: number; value?: string }> = [];
+	const fields: Array<{
+		customId: string;
+		type: number;
+		value?: string | boolean | null;
+		values?: readonly string[];
+	}> = [];
 	for (const component of components) {
 		if (!isRecord(component)) continue;
 		const customId = readString(component, 'custom_id');
 		const type = readInteger(component, 'type');
-		const value = readAnyString(component, 'value');
+		const value = readModalValue(component, 'value');
+		const values = readStringArray(component, 'values');
 		if (customId && type !== undefined) {
-			fields.push({ customId, type, ...(value === undefined ? {} : { value }) });
+			fields.push({
+				customId,
+				type,
+				...(value === undefined ? {} : { value }),
+				...(values === undefined ? {} : { values }),
+			});
 		}
 		const children = component.components;
 		if (Array.isArray(children)) fields.push(...collectModalFields(children));
 		if (isRecord(component.component)) fields.push(...collectModalFields([component.component]));
 	}
 	return fields;
+}
+
+function readModalValue(
+	value: Record<string, unknown>,
+	key: string,
+): string | boolean | null | undefined {
+	const field = value[key];
+	return field === null || typeof field === 'string' || typeof field === 'boolean'
+		? field
+		: undefined;
+}
+
+function readStringArray(
+	value: Record<string, unknown>,
+	key: string,
+): readonly string[] | undefined {
+	const field = value[key];
+	return Array.isArray(field) && field.every((item) => typeof item === 'string')
+		? field
+		: undefined;
 }
 
 type HandlerOutcome<T> = { type: 'success'; value: T } | { type: 'failure' } | { type: 'timeout' };

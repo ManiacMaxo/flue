@@ -1154,6 +1154,139 @@ Final reference gap audit:
   fixed-workspace HTTP package.
 - No justified fixed-workspace HTTP ingress gap remains.
 
+### Discord — 2026-06-13
+
+Status:
+
+- Complete.
+
+Reference capability brief:
+
+- The high-level adapter documentation describes HTTP interactions for
+  commands and components, Gateway delivery for ordinary messages and
+  reactions, and broad outbound messaging, files, reactions, typing, and
+  history operations.
+- No reference implementation, architecture, types, fixtures, payloads,
+  snapshots, or tests were consulted.
+
+Primary sources:
+
+- Discord interaction overview and receiving/responding documentation.
+- Discord application-command type and autocomplete documentation.
+- Discord interaction context, installation owner, locale, token lifetime,
+  and response deadline documentation.
+- Current `discord-api-types` declarations and generated runtime package for
+  interaction payload and REST route contracts.
+- Current `@discordjs/rest` 2.6.1 export map, declarations, and Fetch-based web
+  implementation.
+
+Clean-room affirmation:
+
+- All normalized types, synthetic payloads, generated keys and signatures,
+  fake ids, assertions, and tests were designed from Discord's official
+  documentation, current provider declarations, and Flue's existing channel
+  contract. Nothing was copied or translated from Chat SDK source or tests.
+
+Decisions:
+
+- Keep one `POST /interactions` surface with exact-byte Ed25519 verification,
+  fixed application identity, internal PING/PONG, required provider responses,
+  and the existing 2.5-second application deadline.
+- Add typed autocomplete interactions and support chat-input, user, message,
+  and primary-entry-point application-command data.
+- Preserve component message context, command target/resolved data, modal
+  resolved data, and current scalar or list modal field values without
+  duplicating Discord's complete payload type system.
+- Normalize invoking user, locale, interaction context, and authorizing
+  installation owners. Allow `destination` to be absent when Discord does not
+  supply enough channel context, and represent private-channel identity
+  without implying bot-token posting authority.
+- Move the interaction token under an explicit short-lived `capabilities`
+  object. Keep `raw` capability-bearing and document both values out of
+  dispatch input, model context, logs, and persistence.
+- Preserve the existing guild channel/thread conversation-key format. Add a
+  private-channel key without changing existing guild or bot-DM keys.
+- Keep Gateway, ordinary messages, reactions, and long-lived transports
+  outside the HTTP channel.
+- Keep `@discordjs/rest` as the project-owned outbound client. Its package-root
+  conditional export executes with global Fetch in workerd. Use
+  `discord-api-types` as a type-only dependency in Worker-facing canonical
+  code and construct the documented REST route locally.
+
+Tests:
+
+- Expanded original synthetic signed payloads for all application-command
+  types, autocomplete, component message context, destination-free modals,
+  modern scalar and list modal values, private channels, installation owners,
+  locale, user identity, contradictory identity, and capability placement.
+- Retained Node and workerd exact-byte Ed25519 verification, application
+  identity, response, timeout, and canonical-key coverage.
+- Added a real `@discordjs/rest` workerd execution test against a fake Fetch
+  transport, with no successful provider request.
+
+Validation:
+
+- Package build, strict typecheck, Node tests, and workerd tests pass.
+- Example strict typecheck, real REST-client workerd test, Node build, and
+  Cloudflare build pass.
+- A built Node server returns the typed response for an original valid signed
+  autocomplete interaction and returns `401` for a body changed after signing.
+- Documentation check and production build pass.
+- The real `flue add` CLI test suite passes.
+- Prepared publish docs were regenerated.
+- The packed package contains the intended runtime declarations, JavaScript,
+  README, license, and prepared docs without an outbound client or tool.
+- A clean strict TypeScript consumer compiles against the packed tarball and
+  narrows autocomplete, capabilities, optional destinations, and
+  private-channel references.
+
+Focused review:
+
+- Reviewed the complete provider diff for exact-byte verification, identity
+  consistency, optional destination semantics, command and interaction
+  narrowing, capability handling, required responses, deadlines, public
+  declarations, and Cloudflare execution.
+- Restored the existing guild channel/thread conversation-key shape after
+  finding that an intermediate simplification would have unnecessarily changed
+  durable thread identities.
+- No unresolved correctness findings remain.
+
+Deviations:
+
+- The initial example used runtime `Routes` and response-enum imports from
+  `discord-api-types`. Its runtime ESM wrapper did not expose `Routes` in the
+  workerd execution spike, so canonical Worker-facing code now uses type-only
+  provider imports and the documented REST path string.
+- The first workerd client spike installed its fake global Fetch after the SDK
+  had captured Fetch during static module initialization. One request using
+  the literal dummy token `discord-test-token` reached Discord and returned
+  `401`; no real credential or successful remote operation was involved. The
+  permanent test installs the fake before dynamically importing the SDK and
+  now remains fully local.
+
+Deferrals:
+
+- Discord Gateway, ordinary messages and mentions, reactions, typing, presence,
+  voice, and other long-lived event delivery remain outside the HTTP channel.
+- OAuth installation flows, dynamic multi-installation credentials, command
+  registration, interaction follow-up storage, and durable deduplication remain
+  application concerns.
+
+Final reference gap audit:
+
+- Reopened only the pinned high-level Discord adapter README after
+  implementation; no reference source or test files were used.
+- Slash commands and other application commands, autocomplete, buttons and
+  other components, and modal submissions are represented as verified HTTP
+  ingress.
+- Regular messages, mentions, reactions, and role-mention policy require
+  Gateway delivery and remain deliberately outside this serverless HTTP
+  channel.
+- Posting, editing, deleting, files, reactions, typing, history, embeds,
+  buttons, and other broad outbound capabilities remain available through the
+  project-owned REST client rather than a Flue abstraction.
+- No justified HTTP-interaction ingress gap remains.
+
 ## Implementation log template
 
 Append one section per provider while implementing:

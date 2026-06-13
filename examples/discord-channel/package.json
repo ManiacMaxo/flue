@@ -4,7 +4,8 @@
 	"type": "module",
 	"scripts": {
 		"build": "flue build --target node",
-		"check:types": "tsc --noEmit"
+		"check:types": "tsc --noEmit",
+		"test": "vitest run --config vitest.workerd.config.ts"
 	},
 	"dependencies": {
 		"@discordjs/rest": "^2.6.1",
@@ -13,8 +14,10 @@
 		"discord-api-types": "^0.38.48"
 	},
 	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "0.16.15",
 		"@flue/cli": "workspace:*",
 		"agents": "^0.14.1",
-		"typescript": "^6.0.3"
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.6"
 	}
 }
