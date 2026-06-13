@@ -245,6 +245,7 @@ function normalizeAction(
 	const action = actions[0];
 	const actionId = readString(action, 'action_id');
 	if (!actionId) return undefined;
+	const value = readOptionalString(action, 'value');
 	const channel = readRecord(raw, 'channel');
 	const message = readRecord(raw, 'message');
 	const container = readRecord(raw, 'container');
@@ -280,6 +281,7 @@ function normalizeAction(
 		teamId,
 		userId,
 		actionId,
+		...(value === undefined ? {} : { value }),
 		channelId,
 		messageTs,
 		threadTs,

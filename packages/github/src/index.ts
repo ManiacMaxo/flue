@@ -1,4 +1,4 @@
-import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime/tool';
 import { createGitHubClient } from './client.ts';
 import {
 	DuplicateGitHubHandlerError,

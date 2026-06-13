@@ -3,6 +3,7 @@ import { toJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { formatPackagedSkillFilePath } from './agent.ts';
 import { parseSkillMarkdown } from './skill-frontmatter.ts';
+import { isTopLevelObjectSchema, stripJsonSchemaMeta } from './tool-schema.ts';
 import type { PackagedSkillDirectory, SkillReference } from './types.ts';
 
 /**
@@ -265,25 +266,6 @@ function needsEnvelope(schema: v.GenericSchema): boolean {
 	// Tool parameters must be an object at the top level; anything else gets
 	// wrapped in `{ result: ... }`.
 	return !isTopLevelObjectSchema(schema);
-}
-
-/**
- * Whether a valibot schema produces a top-level JSON Schema `object`, judged
- * by valibot's runtime `type` discriminator. Every LLM provider requires tool
- * arguments to be a top-level object.
- */
-export function isTopLevelObjectSchema(schema: v.GenericSchema): boolean {
-	const type = (schema as { type?: string }).type;
-	return ['object', 'strict_object', 'loose_object', 'object_with_rest'].includes(type ?? '');
-}
-
-/** Drop `$schema` (valibot emits draft-07) — providers don't expect it. */
-export function stripJsonSchemaMeta(jsonSchema: Record<string, unknown>): Record<string, unknown> {
-	const { $schema: _schema, ...rest } = jsonSchema as { $schema?: unknown } & Record<
-		string,
-		unknown
-	>;
-	return rest;
 }
 
 function formatIssuePath(path: ReadonlyArray<{ key?: unknown }>): string {

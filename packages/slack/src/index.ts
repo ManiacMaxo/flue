@@ -1,4 +1,4 @@
-import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime/tool';
 import { createSlackClient } from './client.ts';
 import {
 	DuplicateSlackHandlerError,
@@ -63,6 +63,7 @@ export interface SlackActionEnvelope {
 	teamId: string;
 	userId: string;
 	actionId: string;
+	value?: string;
 	channelId: string;
 	messageTs: string;
 	threadTs: string;

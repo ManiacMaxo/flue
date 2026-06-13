@@ -1,4 +1,4 @@
-import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime/tool';
 import { createDiscordClient } from './client.ts';
 import {
 	DuplicateDiscordHandlerError,
@@ -66,6 +66,7 @@ export interface DiscordComponent {
 	label?: string;
 	description?: string;
 	style?: number;
+	disabled?: boolean;
 	value?: string;
 	placeholder?: string;
 	required?: boolean;

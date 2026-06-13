@@ -46,6 +46,15 @@ describe('package entrypoints', () => {
 		expect(routing).not.toHaveProperty('admin');
 	});
 
+	it('exposes the portable tool authoring API from @flue/runtime/tool', async () => {
+		const tool = await import('@flue/runtime/tool');
+
+		expect(tool).toMatchObject({
+			defineTool: expect.any(Function),
+		});
+		expect(tool).not.toHaveProperty('normalizeToolDefinition');
+	});
+
 	it('exposes generated-runtime APIs when generated code imports @flue/runtime/internal', async () => {
 		const internal = await import('@flue/runtime/internal');
 

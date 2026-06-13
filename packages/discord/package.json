@@ -17,15 +17,24 @@
 	},
 	"main": "./dist/index.mjs",
 	"types": "./dist/index.d.mts",
-	"files": ["dist", "docs"],
-	"engines": { "node": ">=22.18.0" },
+	"files": [
+		"dist",
+		"docs"
+	],
+	"engines": {
+		"node": ">=22.18.0"
+	},
 	"scripts": {
 		"build": "tsdown",
 		"check:types": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:workerd": "vitest run --config vitest.workerd.config.ts"
 	},
-	"peerDependencies": { "@flue/runtime": "workspace:^" },
+	"peerDependencies": {
+		"@flue/runtime": "workspace:^"
+	},
 	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "0.16.15",
 		"@flue/runtime": "workspace:*",
 		"hono": "4.12.22",
 		"tsdown": "^0.22.0",

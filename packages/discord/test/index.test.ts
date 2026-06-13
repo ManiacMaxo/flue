@@ -355,7 +355,18 @@ describe('createDiscordChannel()', () => {
 			message: {
 				content: 'Choose',
 				components: [
-					{ type: 1, components: [{ type: 2, customId: 'choose', label: 'Choose' }] },
+					{
+						type: 1,
+						components: [
+							{
+								type: 2,
+								customId: 'choose',
+								label: 'Choose',
+								style: 1,
+								value: 'unsupported',
+							},
+						],
+					},
 				],
 			},
 		}));
@@ -629,7 +640,14 @@ describe('createDiscordChannel()', () => {
 			{ type: 'guild', guildId: 'G1', channelId: 'C/1', channelKind: 'thread' },
 			{
 				content: 'hello',
-				components: [{ type: 1, components: [{ type: 2, customId: 'approve' }] }],
+				components: [
+					{
+						type: 1,
+						components: [
+							{ type: 2, customId: 'approve', label: 'Approve', style: 3 },
+						],
+					},
+				],
 				allowedMentions: { parse: [], users: ['U1'] },
 			},
 		);
@@ -649,9 +667,45 @@ describe('createDiscordChannel()', () => {
 		});
 		expect(JSON.parse(String(init.body))).toEqual({
 			content: 'hello',
-			components: [{ type: 1, components: [{ type: 2, custom_id: 'approve' }] }],
+			components: [
+				{
+					type: 1,
+					components: [
+						{ type: 2, custom_id: 'approve', label: 'Approve', style: 3 },
+					],
+				},
+			],
 			allowed_mentions: { parse: [], users: ['U1'] },
 		});
+	});
+
+	it('rejects unsupported message component fields before an authenticated request', async () => {
+		const fetch = vi.fn(async () => Response.json({ id: 'M1' }));
+		const discord = createChannel({ fetch });
+
+		await expect(
+			discord.client.postMessage(
+				{ type: 'dm', channelId: 'C1' },
+				{
+					content: 'Choose',
+					components: [
+						{
+							type: 1,
+							components: [
+								{
+									type: 2,
+									customId: 'approve',
+									label: 'Approve',
+									style: 3,
+									value: 'not-a-discord-button-field',
+								},
+							],
+						},
+					],
+				},
+			),
+		).rejects.toBeInstanceOf(InvalidDiscordInputError);
+		expect(fetch).not.toHaveBeenCalled();
 	});
 
 	it('follows bounded preserving redirects only on the fixed Discord origin', async () => {

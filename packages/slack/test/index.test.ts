@@ -247,6 +247,7 @@ describe('createSlackChannel()', () => {
 			teamId: 'T1',
 			userId: 'U1',
 			actionId: 'approve',
+			value: 'yes',
 			channelId: 'C1',
 			messageTs: '1717971234.0012',
 			threadTs: '1717971200.0001',

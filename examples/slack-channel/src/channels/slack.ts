@@ -36,6 +36,7 @@ slack.onAction('approve', async (event) => {
 		input: {
 			type: 'slack.action',
 			actionId: event.actionId,
+			value: event.value,
 			userId: event.userId,
 			messageTs: event.messageTs,
 		},

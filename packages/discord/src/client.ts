@@ -1,3 +1,4 @@
+import { normalizeMessageComponents } from './components.ts';
 import {
 	DiscordApiError,
 	DiscordRateLimitError,
@@ -91,11 +92,14 @@ export function createDiscordClient(options: DiscordChannelOptions): DiscordClie
 }
 
 function serializeMessage(message: DiscordMessage): Record<string, unknown> {
+	const components =
+		message.components === undefined ? undefined : normalizeMessageComponents(message.components);
+	if (message.components !== undefined && !components) {
+		throw new InvalidDiscordInputError('message components');
+	}
 	return {
 		content: message.content,
-		...(message.components === undefined
-			? {}
-			: { components: message.components.map((component) => serializeComponent(component)) }),
+		...(components === undefined ? {} : { components }),
 		...(message.allowedMentions === undefined
 			? {}
 			: {
@@ -112,27 +116,6 @@ function serializeMessage(message: DiscordMessage): Record<string, unknown> {
 					},
 				}),
 	};
-}
-
-function serializeComponent(value: unknown): unknown {
-	if (!isRecord(value)) return value;
-	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [
-			componentWireKey(key),
-			(key === 'components' && Array.isArray(item)) || (key === 'component' && isRecord(item))
-				? key === 'components'
-					? (item as unknown[]).map((child) => serializeComponent(child))
-					: serializeComponent(item)
-				: item,
-		]),
-	);
-}
-
-function componentWireKey(key: string): string {
-	if (key === 'customId') return 'custom_id';
-	if (key === 'minLength') return 'min_length';
-	if (key === 'maxLength') return 'max_length';
-	return key;
 }
 
 function assertDestinationRef(ref: DiscordDestinationRef): void {
@@ -153,7 +136,10 @@ function assertMessage(message: DiscordMessage): void {
 	if (typeof message.content !== 'string' || message.content.length === 0) {
 		throw new InvalidDiscordInputError('message content');
 	}
-	if (message.components !== undefined && !Array.isArray(message.components)) {
+	if (
+		message.components !== undefined &&
+		normalizeMessageComponents(message.components) === undefined
+	) {
 		throw new InvalidDiscordInputError('message components');
 	}
 	const mentions = message.allowedMentions;

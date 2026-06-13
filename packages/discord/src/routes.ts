@@ -1,3 +1,4 @@
+import { normalizeMessageComponents, normalizeModalComponents } from './components.ts';
 import type {
 	DiscordCommandData,
 	DiscordCommandResponse,
@@ -315,16 +316,17 @@ function serializeInteractionResponse(
 		const customId = value.customId;
 		const title = value.title;
 		const components = value.components;
+		const normalizedComponents = normalizeModalComponents(components);
 		if (
 			!isBoundedString(customId, 1, 100) ||
 			!isBoundedString(title, 1, 45) ||
-			!isValidModalComponents(components)
+			!normalizedComponents
 		) {
 			return undefined;
 		}
 		return {
 			type: 9,
-			data: { custom_id: customId, title, components: serializeComponents(components) },
+			data: { custom_id: customId, title, components: normalizedComponents },
 		};
 	}
 	return undefined;
@@ -334,20 +336,15 @@ function serializeMessage(value: unknown): Record<string, unknown> | undefined {
 	if (!isRecord(value) || !isBoundedString(value.content, 1, 2_000)) {
 		return undefined;
 	}
-	if (
-		value.components !== undefined &&
-		(!Array.isArray(value.components) || !isValidMessageComponents(value.components))
-	) {
-		return undefined;
-	}
+	const components =
+		value.components === undefined ? undefined : normalizeMessageComponents(value.components);
+	if (value.components !== undefined && !components) return undefined;
 	if (value.allowedMentions !== undefined && !isAllowedMentions(value.allowedMentions)) {
 		return undefined;
 	}
 	return {
 		content: value.content,
-		...(value.components === undefined
-			? {}
-			: { components: serializeComponents(value.components) }),
+		...(components === undefined ? {} : { components }),
 		...(value.allowedMentions === undefined
 			? {}
 			: {
@@ -366,95 +363,8 @@ function serializeMessage(value: unknown): Record<string, unknown> | undefined {
 	};
 }
 
-function isValidMessageComponents(value: readonly unknown[]): boolean {
-	if (value.length < 1 || value.length > 5) return false;
-	return value.every((row) => {
-		if (!isRecord(row) || row.type !== 1 || !Array.isArray(row.components)) return false;
-		if (row.components.length < 1 || row.components.length > 5) return false;
-		return row.components.every(
-			(button) =>
-				isRecord(button) &&
-				button.type === 2 &&
-				typeof button.style === 'number' &&
-				Number.isSafeInteger(button.style) &&
-				button.style >= 1 &&
-				button.style <= 4 &&
-				isBoundedString(button.customId, 1, 100) &&
-				isBoundedString(button.label, 1, 80),
-		);
-	});
-}
-
-function isValidModalComponents(value: unknown): value is readonly unknown[] {
-	if (!Array.isArray(value) || value.length < 1 || value.length > 5) return false;
-	return value.every((label) => {
-		if (
-			!isRecord(label) ||
-			label.type !== 18 ||
-			!isBoundedString(label.label, 1, 45) ||
-			(label.description !== undefined && !isBoundedString(label.description, 1, 100)) ||
-			!isRecord(label.component)
-		) {
-			return false;
-		}
-		const input = label.component;
-		if (
-			input.type !== 4 ||
-			!isBoundedString(input.customId, 1, 100) ||
-			(input.style !== 1 && input.style !== 2) ||
-			(input.placeholder !== undefined && !isBoundedString(input.placeholder, 1, 100)) ||
-			(input.required !== undefined && typeof input.required !== 'boolean')
-		) {
-			return false;
-		}
-		const minLength = readOptionalBoundedInteger(input.minLength, 0, 4_000);
-		const maxLength = readOptionalBoundedInteger(input.maxLength, 1, 4_000);
-		if (input.minLength !== undefined && minLength === undefined) return false;
-		if (input.maxLength !== undefined && maxLength === undefined) return false;
-		return minLength === undefined || maxLength === undefined || minLength <= maxLength;
-	});
-}
-
-function readOptionalBoundedInteger(
-	value: unknown,
-	minimum: number,
-	maximum: number,
-): number | undefined {
-	return typeof value === 'number' &&
-		Number.isSafeInteger(value) &&
-		value >= minimum &&
-		value <= maximum
-		? value
-		: undefined;
-}
-
 function isBoundedString(value: unknown, minimum: number, maximum: number): value is string {
 	return typeof value === 'string' && value.length >= minimum && value.length <= maximum;
-}
-
-function serializeComponents(components: readonly unknown[]): readonly unknown[] {
-	return components.map((component) => serializeComponent(component));
-}
-
-function serializeComponent(value: unknown): unknown {
-	if (!isRecord(value)) return value;
-	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [
-			componentWireKey(key),
-			(key === 'components' && Array.isArray(item)) || (key === 'component' && isRecord(item))
-				? key === 'components'
-					? serializeComponents(item as readonly unknown[])
-					: serializeComponent(item)
-				: item,
-		]),
-	);
-}
-
-function componentWireKey(key: string): string {
-	if (key === 'customId') return 'custom_id';
-	if (key === 'minLength') return 'min_length';
-	if (key === 'maxLength') return 'max_length';
-	return key;
 }
 
 function isAllowedMentions(value: unknown): value is {
