@@ -1,5 +1,5 @@
-import { createSlackChannel } from '@flue/slack';
 import { dispatch } from '@flue/runtime';
+import { createSlackChannel } from '@flue/slack';
 import assistant from '../agents/assistant.ts';
 
 export const slack = createSlackChannel({
@@ -26,11 +26,21 @@ slack.on('app_mention', async (event) => {
 });
 
 slack.onAction('approve', async (event) => {
+	const thread = {
+		teamId: event.teamId,
+		channelId: event.channelId,
+		threadTs: event.threadTs,
+	};
 	await dispatch(assistant, {
-		id: `slack:v1:approval:${encodeURIComponent(event.teamId)}:${encodeURIComponent(event.userId)}`,
-		input: { type: 'slack.approval', actionId: event.actionId },
+		id: slack.conversationKey(thread),
+		input: {
+			type: 'slack.action',
+			actionId: event.actionId,
+			userId: event.userId,
+			messageTs: event.messageTs,
+		},
 	});
-	return { type: 'message', message: { text: 'Approval received.', responseType: 'ephemeral' } };
+	return { type: 'ack' };
 });
 
 function requiredEnv(name: string): string {
