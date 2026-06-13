@@ -12,6 +12,7 @@ your application decide what happens next. Flue provides ingress packages for:
 | Stripe      | `@flue/stripe`      | `/channels/<file>/webhook`                                                              |
 | Notion      | `@flue/notion`      | `/channels/<file>/webhook`                                                              |
 | Resend      | `@flue/resend`      | `/channels/<file>/webhook`                                                              |
+| Shopify     | `@flue/shopify`     | `/channels/<file>/webhook`                                                              |
 | Slack       | `@flue/slack`       | `/channels/<file>/events`, `/channels/<file>/interactions`, `/channels/<file>/commands` |
 | Discord     | `@flue/discord`     | `/channels/<file>/interactions`                                                         |
 | Teams       | `@flue/teams`       | `/channels/<file>/activities`                                                           |
@@ -35,6 +36,7 @@ flue add github --print | codex
 flue add stripe --print | codex
 flue add notion --print | codex
 flue add resend --print | codex
+flue add shopify --print | codex
 flue add slack --print | codex
 flue add discord --print | codex
 flue add teams --print | codex
@@ -64,6 +66,7 @@ See the provider guides for [GitHub](/docs/guide/channels/github/),
 [Stripe](/docs/guide/channels/stripe/),
 [Notion](/docs/guide/channels/notion/),
 [Resend](/docs/guide/channels/resend/),
+[Shopify](/docs/guide/channels/shopify/),
 [Slack](/docs/guide/channels/slack/),
 [Discord](/docs/guide/channels/discord/),
 [Microsoft Teams](/docs/guide/channels/teams/),
@@ -84,6 +87,7 @@ src/channels/github.ts  -> /channels/github/webhook
 src/channels/stripe.ts  -> /channels/stripe/webhook
 src/channels/notion.ts  -> /channels/notion/webhook
 src/channels/resend.ts  -> /channels/resend/webhook
+src/channels/shopify.ts -> /channels/shopify/webhook
 src/channels/slack.ts   -> /channels/slack/events
                           /channels/slack/interactions
                           /channels/slack/commands
@@ -210,6 +214,7 @@ Channel packages are stateless and do not deduplicate deliveries.
 | GitHub                  | Failed deliveries can be inspected and manually redelivered.                   |
 | Stripe                  | Failed live deliveries retry for up to three days; ordering is not guaranteed. |
 | Resend                  | Delivery is at least once; use `svix-id` for application-owned deduplication.  |
+| Shopify                 | Retries run for four hours; deduplicate with the webhook id.                   |
 | Slack Events API        | Slack may retry and supplies retry metadata.                                   |
 | Slack interactivity     | Requires a prompt acknowledgement and is not a dependable retry queue.         |
 | Discord interactions    | Failures are user-visible and do not provide dependable redelivery.            |

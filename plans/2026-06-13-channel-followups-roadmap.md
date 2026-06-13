@@ -802,6 +802,239 @@ Focused review:
 - No unresolved correctness, security, packaging, Cloudflare, or developer
   experience findings remain.
 
+### Shopify implementation — 2026-06-13
+
+Status:
+
+- Complete.
+
+Primary sources:
+
+- Shopify HTTPS webhook delivery, verification, subscription, filtering,
+  versioning, topic-reference, GraphQL Admin API, and privacy-compliance
+  documentation.
+- Official `@shopify/shopify-api` v13.0.0 and
+  `@shopify/admin-api-client` v1.1.2 package metadata, declarations, runtime
+  artifacts, and official source.
+- Current Cloudflare Workers Web Crypto and workerd-testing documentation.
+
+Clean-room affirmation:
+
+- The design and fixtures derive from Shopify's primary specifications and
+  original synthetic payloads. No third-party adapter implementation, types,
+  fixtures, payloads, snapshots, or tests are being copied or translated.
+
+Eligibility:
+
+- Eligible for stateless JSON HTTPS webhook delivery. Shopify computes a
+  base64 HMAC-SHA256 over the exact request body, requires no ingress-side
+  installation session, and delivers topic, shop, API-version, delivery, and
+  optional causal metadata in request headers.
+- Shopify permits XML subscriptions, but the first-party Flue channel is
+  intentionally JSON-only. Connector guidance must configure `JSON`, and an
+  XML delivery receives `415`.
+- Shopify documents a one-second connection timeout, five-second total
+  response deadline, eight retries over four hours, possible duplicate and
+  out-of-order delivery, and no signed timestamp or replay window.
+  Application-owned deduplication should use the webhook delivery id.
+- App Store apps must receive `customers/data_request`, `customers/redact`,
+  and `shop/redact`; those topics use the same verified route. Installation
+  and token state must remain outside ingress because `shop/redact` can arrive
+  after uninstall.
+- Direct Web Crypto verification and the official lightweight Admin GraphQL
+  client both executed in workerd without compatibility flags. The full
+  `@shopify/shopify-api` package also has a Worker adapter, but it is
+  Node-oriented, substantially broader, and unnecessary for either ingress or
+  the editable example.
+
+Design:
+
+- Add `@flue/shopify`, `examples/shopify-channel`, `flue add shopify`, a setup
+  guide, and an API reference.
+- Publish one fixed `POST /webhook` route.
+- Accept `clientSecret` plus optional `previousClientSecret` so deployments
+  can overlap Shopify's documented secret-rotation propagation period.
+- Verify the exact raw bytes with Web Crypto before decoding or parsing.
+  Require the documented HMAC, topic, shop-domain, API-version, and webhook-id
+  headers; expose optional event-id, triggered-at, subscription-name, and
+  sub-topic metadata.
+- Deliver one typed `ShopifyWebhookEvent` containing provider-native topic and
+  delivery metadata, losslessly parsed JSON payload, and exact raw body. Keep
+  the payload JSON-typed rather than publishing a false closed union: its
+  schema changes by topic and API version, and subscription `includeFields`
+  filtering can intentionally remove normal resource fields. Represent unsafe
+  numeric literals as strings so Shopify's 64-bit ids are never silently
+  rounded by JavaScript.
+- Preserve every verified topic, including future topics. Do not return `404`
+  for an event merely because Flue has no topic-specific model.
+- Expose `handlerTimeoutMs`, defaulting to and capped at 4500ms across body
+  receipt, verification, parsing, and the application callback to leave time
+  before Shopify's five-second deadline. Route failure or timeout returns
+  `500`; timed-out work can continue because JavaScript promises are not
+  cancellable.
+- Preserve normal result behavior: no value becomes empty `200`,
+  JSON-compatible values become JSON, and ordinary Hono or Fetch responses
+  pass through. Document that non-2xx responses request retry.
+- Use `shopDomain` as tenant metadata, `webhookId` as delivery identity, and
+  `eventId` only as optional causal correlation. Do not add a conversation
+  helper or universal resource key.
+- Document that Shopify's HMAC covers the body rather than the delivery
+  headers. Header metadata is provider-supplied routing context, not an
+  authorization capability or independent cryptographic claim.
+
+Dependencies and example:
+
+- `@flue/shopify` depends on Hono and the standards-based `lossless-json`
+  parser, and uses Web Crypto. It does not depend on the Shopify SDK or
+  `@flue/runtime`.
+- The editable example exports an
+  `@shopify/admin-api-client@1.1.2` GraphQL client with an injected Fetch
+  implementation, handles `orders/create`, dispatches through an explicitly
+  local shop-and-order instance id, and defines a narrow tool bound to that
+  selected order.
+- Trusted application code binds the shop domain, Admin API version, and
+  access token. The tool must not let model input select an arbitrary shop,
+  token, or URL.
+- Node and workerd tests execute the same exported client factory against
+  fail-closed fake Fetch. The expected declaration-only `Buffer` reference in
+  `@shopify/graphql-client` must be resolved through the packed strict-consumer
+  check without adding Node runtime code.
+
+Non-goals:
+
+- App installation, OAuth, token lookup, webhook registration, subscription
+  filters, secret rotation orchestration, deduplication, ordering, replay
+  persistence, compliance-business workflows, and broad outbound Admin API
+  tools.
+- XML webhook delivery, EventBridge, Google Pub/Sub, Shopify Events beta
+  surfaces, polling, or long-lived transports.
+- A universal Shopify topic payload schema or a claim that header metadata is
+  signed independently of the body.
+
+Foundation reflection to revisit after implementation:
+
+- Whether a provider with a deliberately JSON-typed payload still satisfies
+  the channel event contract more honestly than a partial topic union.
+- Whether the fourth provider-specific SDK declaration issue justifies any
+  shared packaging guidance beyond the existing packed-consumer gate.
+- Whether the five-second delivery limit exposes any shared timeout behavior
+  that should be reconciled across other fixed webhook channels.
+
+Implementation:
+
+- Added `@flue/shopify` with one fixed `POST /webhook` route, exact-byte
+  Web Crypto HMAC verification, current and previous secret overlap, required
+  and optional delivery metadata, lossless JSON parsing, body limiting, a
+  complete-route deadline, future-topic delivery, and the established
+  Hono-compatible result contract.
+- Added original Node and workerd protocol suites. They cover exact bytes,
+  current and previous secrets, missing, malformed, and incorrect
+  authentication, required and optional metadata, compliance and future
+  topics, unsafe 64-bit numeric ids, UTF-8 and JSON failures, media type,
+  declared and streamed body limits, handler results, complete-route timeout,
+  constructor validation, and route publication.
+- Added `examples/shopify-channel` with the official lightweight Admin
+  GraphQL client, a shared injected-Fetch factory, `orders/create` dispatch, an
+  explicitly local shop-and-order instance id, a shop-bound order retrieval
+  tool, and Node and workerd fail-closed client tests.
+- Added `flue add shopify`, the Shopify connector recipe, setup and API docs,
+  navigation and channel overview entries, README, changelog, and publish
+  wiring.
+
+Validation:
+
+- Package build, strict typecheck, ten Node tests, and three workerd ingress
+  tests pass. Workerd executes Web Crypto verification, current and rotated
+  secrets, lossless unsafe-id parsing, and streamed body limiting with
+  `process` and `Buffer` unavailable.
+- Example strict typecheck, Node fake-client test, workerd fake-client test,
+  Node build, and Cloudflare target build pass. Both runtime tests execute the
+  same exported `createShopifyClient()` factory and reject unexpected network
+  destinations. The client workerd test runs without compatibility flags or
+  Node globals.
+- The generated Flue Worker includes `nodejs_compat` because the current Flue
+  runtime requires it for API-key lookup and AsyncLocalStorage. This does not
+  weaken the provider proof: package verification and the official Admin
+  client were separately executed in workerd without that flag.
+- A built Node application returned an empty `200` for an original locally
+  signed future-topic body and `401` when one value changed under the same
+  signature.
+- The full CLI suite passes: 54 Node tests and 24 Vitest tests. The built CLI
+  returned the Shopify recipe through the locally built connector website.
+- Documentation check and production build pass, and the connector website
+  build serves `/cli/connectors/shopify.md`.
+- Publish preparation and package packing pass. The tarball contains only the
+  intended distribution, prepared documentation, README, license, and
+  manifest files.
+- A clean strict TypeScript consumer installed only the packed
+  `@flue/shopify` package and TypeScript, resolved Hono and `lossless-json`,
+  compiled a custom Hono environment, and imported the constructor at
+  runtime.
+- A separate clean workerd consumer installed the packed package and executed
+  exact-byte verification plus unsafe-id parsing without compatibility flags,
+  `process`, or `Buffer`.
+- Focused Biome, Prettier, whitespace, and credential-pattern checks pass.
+  The repository-wide lint command still reports unrelated existing warnings
+  in runtime, Postgres, Notion, and CLI files. No Shopify test or build
+  contacted Shopify.
+
+Corrections and deviations:
+
+- Ordinary `JSON.parse()` silently rounds Shopify's valid 64-bit numeric ids.
+  The package therefore adds the small, standards-based `lossless-json`
+  runtime dependency. Safe numeric literals remain numbers; unsafe literals
+  become exact decimal strings. The example validates `string | number` ids
+  and normalizes them to strings before constructing GraphQL GIDs.
+- The initial 4500ms timer covered only the application callback. Independent
+  review demonstrated that a slow request body plus a near-limit callback
+  could return `200` after Shopify's five-second total deadline. The final
+  timeout covers body receipt, verification, parsing, and callback execution;
+  cumulative-duration coverage protects that behavior.
+- The package does not accept the full Shopify SDK for ingress. Direct Web
+  Crypto implements the documented verification operation without a
+  Node-oriented package, adapter initialization, global runtime state, topic
+  normalization, or unrelated installation APIs.
+- The example uses `@shopify/admin-api-client@1.1.2`, not the full SDK or the
+  legacy REST client. Its public dependency graph has a declaration-only
+  `Buffer` reference, so the example carries `@types/node` as a development
+  dependency while the channel package and runtime remain free of Node types
+  and code.
+
+Foundation reflection:
+
+- A JSON-typed provider payload is the honest contract for Shopify. Topic
+  payloads vary by API version and subscription field selection, and a partial
+  typed union would either reject valid filtered deliveries or overstate what
+  Flue validated. Provider-native topic and delivery metadata still give the
+  callback a useful typed surface.
+- Shopify is the first provider to require lossless generic JSON parsing.
+  The problem and dependency are provider-specific; no existing channel gains
+  correctness from changing its parser, so no shared abstraction is
+  justified.
+- The complete-route deadline is a concrete Shopify requirement because the
+  provider documents five seconds for the entire delivery. Other packages
+  should not be changed merely for consistency; their documented provider
+  deadline and current timer semantics must be reviewed independently before
+  any cross-channel change.
+- Provider SDK declaration friction remains best caught through each
+  example's strict typecheck and packed-consumer gate. The Shopify channel
+  package itself avoids the issue by keeping its outbound client
+  project-owned.
+- Fixed discovery, the single-object callback, normal response handling,
+  project-owned clients and tools, and Node/workerd validation all held. No
+  shared routing or response machinery change is justified.
+
+Focused review:
+
+- Independent review found the complete-route deadline defect described
+  above. The implementation, public JSDoc, API reference, guide, connector,
+  README, and roadmap now consistently define `handlerTimeoutMs` across body
+  receipt, verification, parsing, and callback execution.
+- Review requested stronger workerd evidence for unsafe numeric parsing and
+  streamed limits. Both now execute in the package's workerd suite.
+- No unresolved correctness, security, packaging, Cloudflare, or developer
+  experience findings remain.
+
 ## 6. Keep These As Separate Product Decisions
 
 ### Generic HTTP or webhook adapter

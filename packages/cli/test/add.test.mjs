@@ -48,6 +48,7 @@ before(async () => {
 			stripe: 'channel--stripe.md',
 			notion: 'channel--notion.md',
 			resend: 'channel--resend.md',
+			shopify: 'channel--shopify.md',
 			slack: 'channel--slack.md',
 			discord: 'channel--discord.md',
 			teams: 'channel--teams.md',
@@ -87,6 +88,7 @@ describe('flue add', () => {
 		assert.match(result.stderr, /flue add stripe\s+channel\s+https:\/\/stripe\.com/);
 		assert.match(result.stderr, /flue add notion\s+channel\s+https:\/\/developers\.notion\.com/);
 		assert.match(result.stderr, /flue add resend\s+channel\s+https:\/\/resend\.com/);
+		assert.match(result.stderr, /flue add shopify\s+channel\s+https:\/\/shopify\.dev/);
 		assert.match(result.stderr, /flue add slack\s+channel\s+https:\/\/slack\.com/);
 		assert.match(
 			result.stderr,
@@ -165,6 +167,23 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('without `nodejs_compat`'));
 		assert.ok(result.stdout.includes('fake transport'));
 		assert.ok(result.stdout.includes('Never create a receiving domain'));
+	});
+
+	it('prints the Shopify recipe with signed ingress and a shop-bound GraphQL client', async () => {
+		const result = await runCli(['add', 'shopify', '--print']);
+
+		assert.equal(result.code, 0);
+		assert.ok(result.stdout.includes('@flue/shopify'));
+		assert.ok(result.stdout.includes('@shopify/admin-api-client@1.1.2'));
+		assert.ok(result.stdout.includes('@types/node'));
+		assert.ok(result.stdout.includes('/channels/shopify/webhook'));
+		assert.ok(result.stdout.includes('apiVersion: ADMIN_API_VERSION'));
+		assert.ok(result.stdout.includes("'2026-04'"));
+		assert.ok(result.stdout.includes('X-Shopify-Hmac-Sha256'));
+		assert.ok(result.stdout.includes('previousClientSecret'));
+		assert.ok(result.stdout.includes('customFetchApi'));
+		assert.ok(result.stdout.includes('without `nodejs_compat`'));
+		assert.ok(result.stdout.includes('Never register a live webhook'));
 	});
 
 	it('prints the Twilio recipe with the Workers-compatible Fetch path', async () => {
