@@ -207,19 +207,25 @@ importers:
 
   examples/discord-channel:
     dependencies:
+      '@discordjs/rest':
+        specifier: ^2.6.1
+        version: 2.6.1
       '@flue/discord':
         specifier: workspace:*
         version: link:../../packages/discord
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      hono:
-        specifier: 4.12.22
-        version: 4.12.22
+      discord-api-types:
+        specifier: ^0.38.48
+        version: 0.38.48
     devDependencies:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      agents:
+        specifier: ^0.14.1
+        version: 0.14.1(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.3.8(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.29.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(just-bash@3.0.1)(react@19.2.6)(rolldown@1.0.2)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -232,13 +238,16 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      hono:
-        specifier: 4.12.22
-        version: 4.12.22
+      '@octokit/rest':
+        specifier: ^22.0.1
+        version: 22.0.1
     devDependencies:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      agents:
+        specifier: ^0.14.1
+        version: 0.14.1(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.3.8(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.29.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(just-bash@3.0.1)(react@19.2.6)(rolldown@1.0.2)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -357,16 +366,25 @@ importers:
       '@flue/slack':
         specifier: workspace:*
         version: link:../../packages/slack
-      hono:
-        specifier: 4.12.22
-        version: 4.12.22
+      '@slack/web-api':
+        specifier: ^8.0.0-rc.1
+        version: 8.0.0-rc.1
     devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 0.16.15
+        version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      agents:
+        specifier: ^0.14.1
+        version: 0.14.1(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/codemode@0.3.8(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.29.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(just-bash@3.0.1)(react@19.2.6)(rolldown@1.0.2)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
   packages/cli:
     dependencies:
@@ -409,16 +427,14 @@ importers:
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
   packages/discord:
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: 0.16.15
-        version: 0.16.15(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
-      '@flue/runtime':
-        specifier: workspace:*
-        version: link:../runtime
+    dependencies:
       hono:
         specifier: 4.12.22
         version: 4.12.22
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 0.16.15
+        version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       tsdown:
         specifier: ^0.22.0
         version: 0.22.0(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(tsx@4.22.3)(typescript@6.0.3)
@@ -430,16 +446,14 @@ importers:
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
   packages/github:
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: 0.16.15
-        version: 0.16.15(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
-      '@flue/runtime':
-        specifier: workspace:*
-        version: link:../runtime
+    dependencies:
       hono:
         specifier: 4.12.22
         version: 4.12.22
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 0.16.15
+        version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       tsdown:
         specifier: ^0.22.0
         version: 0.22.0(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(tsx@4.22.3)(typescript@6.0.3)
@@ -610,16 +624,14 @@ importers:
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
   packages/slack:
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: 0.16.15
-        version: 0.16.15(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
-      '@flue/runtime':
-        specifier: workspace:*
-        version: link:../runtime
+    dependencies:
       hono:
         specifier: 4.12.22
         version: 4.12.22
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 0.16.15
+        version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       tsdown:
         specifier: ^0.22.0
         version: 0.22.0(oxc-resolver@11.19.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(tsx@4.22.3)(typescript@6.0.3)
@@ -1344,6 +1356,18 @@ packages:
 
   '@daytona/toolbox-api-client@0.179.0':
     resolution: {integrity: sha512-CgfoVrksH+WRjf4ZPcNZfE6vhEOmqkGN5JRJ6rqbcfWVNLwpl46/s8qw/Zz8H/37i0c1enNl+QokLyW5fCxS3w==}
+
+  '@discordjs/collection@2.1.1':
+    resolution: {integrity: sha512-LiSusze9Tc7qF03sLCujF5iZp7K+vRNEDBZ86FT9aQAv3vxMLihUvKvpsCWiQ2DJq1tVckopKm1rxomgNUc9hg==}
+    engines: {node: '>=18'}
+
+  '@discordjs/rest@2.6.1':
+    resolution: {integrity: sha512-wwQdgjeaoYFiaG+atbqx6aJDpqW7JHAo0HrQkBTbYzM3/PJ3GweQIpgElNcGZ26DCUOXMyawYd0YF7vtr+fZXg==}
+    engines: {node: '>=18'}
+
+  '@discordjs/util@1.2.0':
+    resolution: {integrity: sha512-3LKP7F2+atl9vJFhaBjn4nOaSWahZ/yWjOvA4e5pnXkt2qyXRCHLxoBQy81GFtLGCq7K9lPm9R517M1U+/90Qg==}
+    engines: {node: '>=18'}
 
   '@durable-streams/client@0.2.6':
     resolution: {integrity: sha512-uHKKbWpsKLhFMeGjG0PgM6LXE3oEIi7FHKlJZkmYGxcqd4Yjjd/QEvnQnDzteRP4Av1uJVM8qjTL7kfKsgeS/w==}
@@ -3169,6 +3193,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@sapphire/async-queue@1.5.5':
+    resolution: {integrity: sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg==}
+    engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
+
+  '@sapphire/snowflake@3.5.5':
+    resolution: {integrity: sha512-xzvBr1Q1c4lCe7i6sRnrofxeO1QTP/LKQ6A6qy0iB4x5yfiSfARMEQEghojzTNALDTcv8En04qYNIco9/K9eZQ==}
+    engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
+
   '@sentry/core@10.53.1':
     resolution: {integrity: sha512-XG4ezlkyuAPjBC5+9kXC94rXXuqYTw9NRhfaDHssbTFaGnqBR8vQX2UUgZfY7ucbeelRDGfBu1sywoU+mB04uA==}
     engines: {node: '>=18'}
@@ -3250,6 +3282,18 @@ packages:
   '@sindresorhus/is@7.2.0':
     resolution: {integrity: sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw==}
     engines: {node: '>=18'}
+
+  '@slack/logger@5.0.0-rc.1':
+    resolution: {integrity: sha512-3vO8zNGvk8n8tXpAzhIz1u/fHjhsLxGMhlZqzJEa3FxlXAe2lsY3qn8XBgKYEG2LmGP6ZWWmDq7vAPr2gZe2CQ==}
+    engines: {node: '>= 20', npm: '>=9.6.4'}
+
+  '@slack/types@3.0.0-rc.1':
+    resolution: {integrity: sha512-xJZm26o5YK95OdM8BliTE+LijNhMGAwLWWpSpfnrPno4DyLBthNAjC7SG/9Ow2gB7oXCeYadpF/nzlYz7XaATg==}
+    engines: {node: '>= 20', npm: '>=9.6.4'}
+
+  '@slack/web-api@8.0.0-rc.1':
+    resolution: {integrity: sha512-ZFJCYoAq0kC4pUe3V41YUOVvG/mceZ1yCcFMRCkYNu5joEuzkhKQpU4XfD2LnkJenWKwW6mg9J5KbBDMRCxCjg==}
+    engines: {node: '>= 20', npm: '>=9.6.4'}
 
   '@smithy/core@3.24.4':
     resolution: {integrity: sha512-3UNRKEyQyAgVgM0LGlerCLm+ChZWZ1GPfde+jBEW6bm6bSBGU1p0EbblaUV3unbhwvidjLA5Zs3sOs7mnZwvAw==}
@@ -3680,6 +3724,10 @@ packages:
 
   '@vitest/utils@4.1.7':
     resolution: {integrity: sha512-T532WBu791cBxJlCl6SO+J14l81DQx6uQHm1bQbmCDY7nqlEIgkza/UFnSBNaUtSf41unldDFjdOBYEQC4b5Hw==}
+
+  '@vladfrangu/async_event_emitter@2.4.7':
+    resolution: {integrity: sha512-Xfe6rpCTxSxfbswi/W/Pz7zp1WWSNn4A0eW4mLkQUewCrXXtMj31lCg+iQyTkh/CkusZSq9eDflu7tjEDXUY6g==}
+    engines: {node: '>=v14.0.0', npm: '>=7.0.0'}
 
   '@volar/kit@2.4.28':
     resolution: {integrity: sha512-cKX4vK9dtZvDRaAzeoUdaAJEew6IdxHNCRrdp5Kvcl6zZOqb6jTOfk3kXkIkG3T7oTFXguEMt5+9ptyqYR84Pg==}
@@ -4273,6 +4321,9 @@ packages:
     resolution: {integrity: sha512-9S6m9Sukh1cZNknO1CWAr2QAWsbKLafQiyM5gZ7VgXHeuaoUwffKN4q6NC4A/Mf9iiPlOXQEKW/Mv/mh9/3YFA==}
     hasBin: true
 
+  discord-api-types@0.38.48:
+    resolution: {integrity: sha512-WFUE/2o0lBlLeCQonQ+Pu2RqHAqbytBJ2RlXR91gzk05InSS6k9ShzzLYoymrA4c2oRgRKGE7/VqQJNNdGWSxQ==}
+
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
@@ -4451,6 +4502,9 @@ packages:
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
     engines: {node: '>=6'}
+
+  eventemitter3@4.0.7:
+    resolution: {integrity: sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw==}
 
   eventemitter3@5.0.4:
     resolution: {integrity: sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==}
@@ -5142,6 +5196,9 @@ packages:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
 
+  magic-bytes.js@1.13.0:
+    resolution: {integrity: sha512-afO2mnxW7GDTXMm5/AoN1WuOcdoKhtgXjIvHmobqTD1grNplhGdv3PFOyjCVmrnOZBIT/gD/koDKpYG+0mvHcg==}
+
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -5544,9 +5601,17 @@ packages:
   oxc-resolver@11.19.1:
     resolution: {integrity: sha512-qE/CIg/spwrTBFt5aKmwe3ifeDdLfA2NESN30E42X/lII5ClF8V7Wt6WIJhcGZjp0/Q+nQ+9vgxGk//xZNX2hg==}
 
+  p-finally@1.0.0:
+    resolution: {integrity: sha512-LICb2p9CB7FS+0eR1oqWnHhp0FljGLZCWBE9aix0Uye9W8LTQPwMTYVGWQWIw9RdQiDg4+epXQODwIYJtSJaow==}
+    engines: {node: '>=4'}
+
   p-limit@7.3.0:
     resolution: {integrity: sha512-7cIXg/Z0M5WZRblrsOla88S4wAK+zOQQWeBYfV3qJuJXMr+LnbYjaadrFaS0JILfEDPVqHyKnZ1Z/1d6J9VVUw==}
     engines: {node: '>=20'}
+
+  p-queue@6.6.2:
+    resolution: {integrity: sha512-RwFpb72c/BhQLEXIZ5K2e+AhgNVmIejGlTgiB9MzZ0e93GRvqZ7uSi0dvRF7/XIXDeNkra2fNHBxTyPDGySpjQ==}
+    engines: {node: '>=8'}
 
   p-queue@9.3.0:
     resolution: {integrity: sha512-7NED7xhQ74Ngp4JP/2e0VZHp7vSWfJfqeiR92jPgxsz6m0Se4P03YoTKa9dDXyZ3r6P616gUXttrB6nnHYKang==}
@@ -5554,6 +5619,10 @@ packages:
 
   p-retry@4.6.2:
     resolution: {integrity: sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ==}
+    engines: {node: '>=8'}
+
+  p-timeout@3.2.0:
+    resolution: {integrity: sha512-rhIwUycgwwKcP9yTOOFK/AKsAopjjCakVqLHePO3CC6Mir1Z99xT+R63jZxAT5lFZLa2inS5h+ZS2GvR99/FBg==}
     engines: {node: '>=8'}
 
   p-timeout@7.0.1:
@@ -6349,6 +6418,10 @@ packages:
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
+  undici@6.24.1:
+    resolution: {integrity: sha512-sC+b0tB1whOCzbtlx20fx3WgCXwkW627p4EA9uM+/tNNPkSS+eSEld6pAs9nDv7WbY1UUljBMYPtu9BCOrCWKA==}
+    engines: {node: '>=18.17'}
 
   undici@7.24.8:
     resolution: {integrity: sha512-6KQ/+QxK49Z/p3HO6E5ZCZWNnCasyZLa5ExaVYyvPxUwKtbCPMKELJOqh7EqOle0t9cH/7d2TaaTRRa6Nhs4YQ==}
@@ -7935,14 +8008,14 @@ snapshots:
       miniflare: 4.20260601.0
       unenv: 2.0.0-rc.24
       vite: 8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
-      wrangler: 4.100.0
+      wrangler: 4.100.0(@cloudflare/workers-types@4.20260602.1)
       ws: 8.20.1
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
       - workerd
 
-  '@cloudflare/vitest-pool-workers@0.16.15(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))':
+  '@cloudflare/vitest-pool-workers@0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))':
     dependencies:
       '@vitest/runner': 4.1.7
       '@vitest/snapshot': 4.1.7
@@ -7950,7 +8023,7 @@ snapshots:
       esbuild: 0.27.3
       miniflare: 4.20260611.0
       vitest: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(happy-dom@18.0.1)(vite@8.0.14(@types/node@24.13.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
-      wrangler: 4.100.0
+      wrangler: 4.100.0(@cloudflare/workers-types@4.20260602.1)
       zod: 3.25.76
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
@@ -8041,6 +8114,24 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@discordjs/collection@2.1.1': {}
+
+  '@discordjs/rest@2.6.1':
+    dependencies:
+      '@discordjs/collection': 2.1.1
+      '@discordjs/util': 1.2.0
+      '@sapphire/async-queue': 1.5.5
+      '@sapphire/snowflake': 3.5.5
+      '@vladfrangu/async_event_emitter': 2.4.7
+      discord-api-types: 0.38.48
+      magic-bytes.js: 1.13.0
+      tslib: 2.8.1
+      undici: 6.24.1
+
+  '@discordjs/util@1.2.0':
+    dependencies:
+      discord-api-types: 0.38.48
 
   '@durable-streams/client@0.2.6':
     dependencies:
@@ -9608,6 +9699,10 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.4':
     optional: true
 
+  '@sapphire/async-queue@1.5.5': {}
+
+  '@sapphire/snowflake@3.5.5': {}
+
   '@sentry/core@10.53.1': {}
 
   '@sentry/node-core@10.53.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.7.1(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.217.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.41.1)':
@@ -9713,6 +9808,23 @@ snapshots:
       '@simple-git/args-pathspec': 1.0.3
 
   '@sindresorhus/is@7.2.0': {}
+
+  '@slack/logger@5.0.0-rc.1':
+    dependencies:
+      '@types/node': 22.19.19
+
+  '@slack/types@3.0.0-rc.1': {}
+
+  '@slack/web-api@8.0.0-rc.1':
+    dependencies:
+      '@slack/logger': 5.0.0-rc.1
+      '@slack/types': 3.0.0-rc.1
+      '@types/node': 22.19.19
+      '@types/retry': 0.12.0
+      eventemitter3: 5.0.4
+      p-queue: 6.6.2
+      p-retry: 4.6.2
+      retry: 0.13.1
 
   '@smithy/core@3.24.4':
     dependencies:
@@ -10096,6 +10208,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.7
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
+
+  '@vladfrangu/async_event_emitter@2.4.7': {}
 
   '@volar/kit@2.4.28(typescript@6.0.3)':
     dependencies:
@@ -10759,6 +10873,8 @@ snapshots:
 
   direction@2.0.1: {}
 
+  discord-api-types@0.38.48: {}
+
   dom-accessibility-api@0.5.16: {}
 
   dom-serializer@2.0.0:
@@ -11002,6 +11118,8 @@ snapshots:
   event-target-polyfill@0.0.4: {}
 
   event-target-shim@5.0.1: {}
+
+  eventemitter3@4.0.7: {}
 
   eventemitter3@5.0.4: {}
 
@@ -11832,6 +11950,8 @@ snapshots:
 
   lz-string@1.5.0: {}
 
+  magic-bytes.js@1.13.0: {}
+
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -12540,9 +12660,16 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
+  p-finally@1.0.0: {}
+
   p-limit@7.3.0:
     dependencies:
       yocto-queue: 1.2.2
+
+  p-queue@6.6.2:
+    dependencies:
+      eventemitter3: 4.0.7
+      p-timeout: 3.2.0
 
   p-queue@9.3.0:
     dependencies:
@@ -12553,6 +12680,10 @@ snapshots:
     dependencies:
       '@types/retry': 0.12.0
       retry: 0.13.1
+
+  p-timeout@3.2.0:
+    dependencies:
+      p-finally: 1.0.0
 
   p-timeout@7.0.1: {}
 
@@ -13537,6 +13668,8 @@ snapshots:
 
   undici-types@7.18.2: {}
 
+  undici@6.24.1: {}
+
   undici@7.24.8: {}
 
   unenv@2.0.0-rc.24:
@@ -13894,7 +14027,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260611.1
       '@cloudflare/workerd-windows-64': 1.20260611.1
 
-  wrangler@4.100.0:
+  wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260611.1)
@@ -13905,6 +14038,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       workerd: 1.20260611.1
     optionalDependencies:
+      '@cloudflare/workers-types': 4.20260602.1
       fsevents: 2.3.3
     transitivePeerDependencies:
       - bufferutil

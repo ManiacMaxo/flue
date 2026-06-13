@@ -4,6 +4,9 @@ import * as fs from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { formatOffset } from '@flue/runtime/adapter';
+import type { FlueEvent, RunRecord } from '@flue/sdk';
+import { createFlueClient, type FlueEventStream } from '@flue/sdk';
 import { determineAgent } from '@vercel/detect-agent';
 import MiniSearch from 'minisearch';
 import { build } from '../src/lib/build.ts';
@@ -16,9 +19,6 @@ import {
 import { resolveConfigCandidates } from '../src/lib/config-paths.ts';
 import { DEFAULT_DEV_PORT, dev } from '../src/lib/dev.ts';
 import { createEnvLoader, type EnvLoader, selectEnvFile } from '../src/lib/env.ts';
-import { formatOffset } from '@flue/runtime/adapter';
-import { createFlueClient, type FlueEventStream } from '@flue/sdk';
-import type { FlueEvent, RunRecord } from '@flue/sdk';
 import { CATEGORY_ROOTS, CONNECTORS } from './_connectors.generated.ts';
 
 interface ApplicationConfigArgs {
@@ -121,7 +121,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  --env <path>         Select one alternate .env-format file for build/dev/run/connect before config loads.\n' +
 			'                       Without --env, these commands load <project>/.env when present. Shell values win.\n' +
 			'  --category <name>    (flue add) Fetch the generic instructions for a connector category. Pair with a positional URL/path that\n' +
-			"                       points the agent at the provider's docs (e.g. `flue add https://e2b.dev --category sandbox`).\n" +
+			'                       points the agent at provider docs (e.g. `--category sandbox` or `--category channel`).\n' +
 			'  --print              (flue add) Print the raw connector markdown to stdout regardless of whether the caller is an agent.\n' +
 			'  --force              (flue init) Overwrite an existing flue.config.* in the target directory.\n' +
 			'\n' +
@@ -137,7 +137,9 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  flue init --target node\n' +
 			'  flue add\n' +
 			'  flue add daytona | claude\n' +
+			'  flue add slack | codex\n' +
 			'  flue add https://e2b.dev --category sandbox | claude\n' +
+			'  flue add https://docs.stripe.com/webhooks --category channel | codex\n' +
 			'  flue docs\n' +
 			'  flue docs read guide/sandboxes\n' +
 			'  flue docs search "durable execution"\n' +

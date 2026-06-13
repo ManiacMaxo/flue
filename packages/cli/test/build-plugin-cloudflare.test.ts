@@ -29,12 +29,26 @@ describe('CloudflarePlugin', () => {
 		expect(entry).toContain('createSqlSessionStore');
 		expect(entry).toContain('createSqlRunStore');
 	});
+
+	it('imports discovered channels and configures their normalized handlers', async () => {
+		const entry = await new CloudflarePlugin().generateEntryPoint(
+			testBuildContext({
+				agents: [{ name: 'assistant', filePath: '/fixture/agents/assistant.ts' }],
+				channels: [{ name: 'slack', filePath: '/fixture/channels/slack.ts' }],
+			}),
+		);
+
+		expect(entry).toContain('"/fixture/channels/slack.ts"');
+		expect(entry).toContain('normalizeBuiltModules(agentModules, workflowModules, channelModules)');
+		expect(entry).toContain('channelHandlers,');
+	});
 });
 
 function testBuildContext(overrides: Partial<BuildContext> = {}): BuildContext {
 	return {
 		agents: [],
 		workflows: [],
+		channels: [],
 		root: '/fixture',
 		output: '/fixture/dist',
 		runtimeVersion: '0.0.0-test',

@@ -9,10 +9,11 @@
 	"dependencies": {
 		"@flue/github": "workspace:*",
 		"@flue/runtime": "workspace:*",
-		"hono": "4.12.22"
+		"@octokit/rest": "^22.0.1"
 	},
 	"devDependencies": {
 		"@flue/cli": "workspace:*",
+		"agents": "^0.14.1",
 		"typescript": "^6.0.3"
 	}
 }

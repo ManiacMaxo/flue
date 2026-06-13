@@ -1,113 +1,115 @@
 ---
 title: Discord
-description: Configure Discord HTTP interactions, immediate responses, and bot-token posts.
+description: Receive verified Discord interactions and use a project-owned REST client.
 ---
 
-`@flue/discord` implements an HTTP interaction bot. It does not connect to the
-Discord Gateway or receive ordinary channel messages.
+## Add Discord
 
-## Install and configure
+Run the Discord recipe through your coding agent:
 
 ```sh
-pnpm add @flue/discord
+flue add discord --print | codex
 ```
 
-Create a Discord application, add a bot, and collect the application id, public
-key, and bot token. Install the bot with the permissions required to post in
-the destinations your application supports. Register chat-input commands
-separately through Discord's application command API.
+It installs `@flue/discord`, `@discordjs/rest`, and `discord-api-types`.
+Discord does not publish an official JavaScript REST SDK;
+`@discordjs/rest` is the dominant community-maintained client.
 
-Set the application's interactions endpoint URL to a public HTTPS route such
-as:
+Set the application's interactions endpoint to:
 
 ```txt
-https://example.com/webhooks/discord
+https://example.com/channels/discord/interactions
 ```
 
-See Discord's documentation for
-[receiving interactions](https://docs.discord.com/developers/interactions/receiving-and-responding)
-and [application commands](https://docs.discord.com/developers/interactions/application-commands).
+`DISCORD_PUBLIC_KEY` verifies inbound Ed25519 signatures.
+`DISCORD_APPLICATION_ID` constrains signed provider identity.
+`DISCORD_BOT_TOKEN` authenticates outbound REST calls.
 
-```sh
-DISCORD_PUBLIC_KEY=...
-DISCORD_APPLICATION_ID=...
-DISCORD_BOT_TOKEN=...
-```
-
-## Create the channel
+## Channel module
 
 ```ts title="src/channels/discord.ts"
+import { REST } from '@discordjs/rest';
 import { createDiscordChannel } from '@flue/discord';
-import { dispatch } from '@flue/runtime';
+import { defineTool, dispatch } from '@flue/runtime';
+import { InteractionResponseType, Routes } from 'discord-api-types/v10';
 import assistant from '../agents/assistant.ts';
 
-export const discord = createDiscordChannel({
+export const client = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN!);
+
+export const channel = createDiscordChannel({
   publicKey: process.env.DISCORD_PUBLIC_KEY!,
   applicationId: process.env.DISCORD_APPLICATION_ID!,
-  botToken: process.env.DISCORD_BOT_TOKEN!,
+
+  // Path: /channels/discord/interactions
+  async interactions({ interaction }) {
+    if (interaction.type !== 'command' || interaction.data.name !== 'ask') {
+      return {
+        type: InteractionResponseType.ChannelMessageWithSource,
+        data: { content: 'Unsupported interaction.', flags: 64 },
+      };
+    }
+
+    await dispatch(assistant, {
+      id: channel.conversationKey(interaction.destination),
+      input: {
+        type: 'discord.command.ask',
+        interactionId: interaction.id,
+        data: interaction.data,
+      },
+    });
+    return {
+      type: InteractionResponseType.ChannelMessageWithSource,
+      data: { content: 'Your request was accepted.', flags: 64 },
+    };
+  },
 });
 
-discord.onCommand('ask', async (interaction) => {
-  await dispatch(assistant, {
-    id: discord.conversationKey(interaction.destination),
-    input: {
-      type: 'discord.command.ask',
-      interactionId: interaction.id,
-      data: interaction.data,
+export function postMessage(ref: { channelId: string }) {
+  return defineTool({
+    name: 'post_discord_message',
+    description: 'Post to the Discord destination bound to this agent.',
+    parameters: {
+      type: 'object',
+      properties: { content: { type: 'string', minLength: 1 } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+    async execute({ content }) {
+      const result = (await client.post(Routes.channelMessages(ref.channelId), {
+        body: { content },
+      })) as { id?: string };
+      return JSON.stringify({ messageId: result.id });
     },
   });
-
-  return {
-    type: 'message',
-    message: { content: 'Your request was accepted.' },
-    ephemeral: true,
-  };
-});
+}
 ```
 
-Never copy `interaction.token` or `interaction.raw` into dispatched input,
-model-visible context, logs, or durable session history. They may contain
-sensitive provider capabilities.
+PING/PONG is handled internally. Verified commands, components, and modals use
+discriminated variants; unsupported verified interaction types arrive as
+`type: 'unknown'`. Every application callback must return a Discord interaction
+response or an ordinary Hono `Response`.
 
-## Mount the interactions route
+Keep `interaction.token` and `interaction.raw` out of dispatched input, model
+context, logs, and durable history. Bot-token posts are ordinary new messages,
+not interaction follow-ups or guaranteed ephemeral responses.
 
-```ts title="src/app.ts"
-app.mount('/webhooks/discord', discord.routes.interactions());
-```
+For Cloudflare, configure `REST` with `makeRequest: fetch` and use the
+project's Worker secret bindings.
 
-The route verifies the exact timestamp plus raw request bytes, handles PING
-internally, and checks the signed application id before handlers run. Local
-development requires a public HTTPS tunnel.
-
-## Respond to components and modals
-
-Use `onComponent(customId, ...)` for buttons and `onModal(customId, ...)` for
-submitted modals. A component handler can return a message, update the current
-message, or open a modal. A modal handler can return a message or update.
-
-Immediate message responses disable parsed mentions by default. v1 message
-components support action rows containing non-link buttons; modal responses
-support Label components containing text inputs.
-
-## Add a bot-token post tool
+## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+import { createAgent } from '@flue/runtime';
+import { channel, postMessage } from '../channels/discord.ts';
+
 export default createAgent(({ id }) => ({
-  tools: [discord.tools.postMessage(discord.parseConversationKey(id))],
+  model: 'anthropic/claude-haiku-4-5',
+  tools: [postMessage(channel.parseConversationKey(id))],
 }));
 ```
 
-The tool posts an ordinary new message through the bot token. It is not an
-interaction follow-up, edit, or guaranteed ephemeral response. Mention parsing
-is disabled unless trusted application code enables specific mention classes
-when creating the tool.
-
-Supported destinations are guild text or announcement channels, guild threads,
-and bot DMs. Unsupported private contexts are rejected before a handler runs.
-
-Discord does not provide dependable redelivery after an interaction failure.
+Discord interactions do not provide dependable redelivery after failures.
 Claim interaction ids in application-owned storage when unique admission is
 required.
 
-See the [`@flue/discord` reference](/docs/api/discord-channel/) for response
-types, components, clients, tools, and errors.
+See the [`@flue/discord` API reference](/docs/api/discord-channel/).

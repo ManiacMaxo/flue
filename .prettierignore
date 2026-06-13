@@ -7,4 +7,5 @@
 **/.cache/
 packages/cli/bin/_connectors.generated.ts
 connectors/sandbox*.md
+connectors/channel*.md
 plans/

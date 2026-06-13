@@ -99,6 +99,33 @@ describe('resolveConfig()', () => {
 });
 
 describe('flue build', () => {
+	it('rejects a project that contains channels but no agents or workflows', async () => {
+		const root = createFixtureRoot();
+		fs.writeFileSync(path.join(root, 'flue.config.mjs'), `export default { target: 'node' };\n`);
+		fs.mkdirSync(path.join(root, 'channels'));
+		fs.writeFileSync(
+			path.join(root, 'channels', 'custom.mjs'),
+			`export const channel = { routes: [{ method: 'POST', path: '/webhook', handler: () => new Response() }] };\n`,
+		);
+
+		const child = spawn(process.execPath, [cli.pathname, 'build'], {
+			cwd: root,
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+		let output = '';
+		for (const stream of [child.stdout, child.stderr]) {
+			stream.setEncoding('utf8');
+			stream.on('data', (chunk) => {
+				output += chunk;
+			});
+		}
+		const [exitCode] = await once(child, 'exit');
+
+		assert.equal(exitCode, 1);
+		assert.match(output, /No agent or workflow files found/);
+		assert.equal(fs.existsSync(path.join(root, 'dist', 'server.mjs')), false);
+	});
+
 	it('discovers agents and workflows from .flue/ and ignores the bare layout when .flue/ exists', async () => {
 		const root = createFixtureRoot();
 		linkRuntime(root);

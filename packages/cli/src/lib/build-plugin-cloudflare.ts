@@ -8,6 +8,7 @@ import {
 } from './cloudflare-wrangler-merge.ts';
 import {
 	agentVarName,
+	channelVarName,
 	generateBuiltModuleNormalizationSource,
 	workflowVarName,
 } from './generated-entry-normalization.ts';
@@ -19,7 +20,7 @@ export class CloudflarePlugin implements BuildPlugin {
 	entryFilename = '_entry.ts';
 
 	async generateEntryPoint(ctx: BuildContext): Promise<string> {
-		const { agents, appEntry, cloudflareEntry, workflows } = ctx;
+		const { agents, appEntry, channels, cloudflareEntry, workflows } = ctx;
 		const runtimeVersion = JSON.stringify(ctx.runtimeVersion);
 		validateCloudflareAgentNames(ctx);
 		validateCloudflareExportNames(ctx);
@@ -50,6 +51,18 @@ export class CloudflarePlugin implements BuildPlugin {
 			.map(
 				(workflow, index) =>
 					`  ${JSON.stringify(workflow.name)}: ${workflowVarName(workflow.name, index)},`,
+			)
+			.join('\n');
+		const channelImports = channels
+			.map((channel, index) => {
+				const varName = channelVarName(channel.name, index);
+				return `import * as ${varName} from ${JSON.stringify(channel.filePath.replace(/\\/g, '/'))};`;
+			})
+			.join('\n');
+		const channelModuleEntries = channels
+			.map(
+				(channel, index) =>
+					`  ${JSON.stringify(channel.name)}: ${channelVarName(channel.name, index)},`,
 			)
 			.join('\n');
 
@@ -182,6 +195,7 @@ import { registerApiProvider, registerProvider } from '@flue/runtime';
 
 ${agentImports}
 ${workflowImports}
+${channelImports}
 ${userAppImport}
 ${userCloudflareImport}
 ${userCloudflareReExport}
@@ -212,8 +226,11 @@ ${agentModuleEntries}
 const workflowModules = {
 ${workflowModuleEntries}
 };
-const normalized = normalizeBuiltModules(agentModules, workflowModules);
-const { manifest, createdAgents, dispatchAgentNames, workflowHandlers, agentRouteMiddleware, workflowRouteMiddleware } = normalized;
+const channelModules = {
+${channelModuleEntries}
+};
+const normalized = normalizeBuiltModules(agentModules, workflowModules, channelModules);
+const { manifest, createdAgents, dispatchAgentNames, workflowHandlers, agentRouteMiddleware, workflowRouteMiddleware, channelHandlers } = normalized;
 const agentIdentities = {
 ${agentIdentityEntries}
 };
@@ -486,6 +503,7 @@ configureFlueRuntime({
   resolveDispatchAgentName: (agent) => dispatchAgentNames.get(agent),
   agentRouteMiddleware,
   workflowRouteMiddleware,
+  channelHandlers,
   routeAgentRequest: async (request, reqEnv, target) => {
     const binding = reqEnv?.[agentIdentities[target.agentName]?.bindingName];
     if (!binding) return null;

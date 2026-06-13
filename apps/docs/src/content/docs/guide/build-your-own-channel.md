@@ -1,186 +1,168 @@
 ---
 title: Build a custom channel
-description: Connect another provider with public Flue and web-platform primitives.
+description: Add verified provider ingress and application-owned SDK tools.
 ---
 
-A channel is ordinary application code. You do not need a channel registration
-API or generated route convention to connect another provider.
+Use the generic channel recipe when Flue does not provide a first-party ingress
+package:
 
-Use:
+```sh
+flue add https://provider.example/webhooks --category channel --print | codex
+```
 
-- a Fetch handler for ingress;
-- Web Crypto or the provider's verified SDK for authentication;
-- `dispatch(...)` for accepted agent input;
-- `defineTool(...)` for controlled outbound actions;
-- application-owned storage for installation credentials and deduplication.
+A custom channel is ordinary application code discovered from
+`channels/<name>.ts`. It owns provider verification and normalization. Outbound
+API calls use the provider's established SDK or a narrow project-owned Fetch
+client. Tools remain application policy.
 
-## Verify before parsing
+## Define discovered routes
 
-Provider signatures usually cover the original request bytes. Read the body
-once, enforce a conservative size limit, verify the signature, then parse:
+Export a named `channel` value with one or more route declarations:
 
 ```ts title="src/channels/acme.ts"
+import type { Handler } from 'hono';
+
 const MAX_BODY_BYTES = 1024 * 1024;
 
-async function handleWebhook(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return new Response(null, { status: 405 });
+const webhook: Handler = async (c) => {
+  const rawBody = await readLimitedBody(c.req.raw, MAX_BODY_BYTES);
+  if (!rawBody) return c.body(null, 413);
 
-  const body = await readLimitedBody(request, MAX_BODY_BYTES);
-  if (!body) return new Response(null, { status: 413 });
-
-  const signature = request.headers.get('x-acme-signature');
-  if (!signature || !(await verifyAcmeSignature(body, signature))) {
-    return new Response(null, { status: 401 });
+  const signature = c.req.header('x-acme-signature');
+  if (!signature || !(await verifyAcmeSignature(rawBody, signature))) {
+    return c.body(null, 401);
   }
 
   let payload: unknown;
   try {
-    payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+    payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rawBody));
   } catch {
-    return new Response(null, { status: 400 });
+    return c.body(null, 400);
   }
 
-  return routeAcmeEvent(payload);
-}
+  await handleVerifiedEvent(c, normalizeAcmeEvent(payload));
+  return c.body(null, 200);
+};
 
-async function readLimitedBody(request: Request, limit: number): Promise<Uint8Array | undefined> {
-  const declared = request.headers.get('content-length');
-  if (declared && Number(declared) > limit) return undefined;
-  if (!request.body) return new Uint8Array();
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-```
-
-Do not parse and reserialize a signed body before verification. Define exact
-method, path, content-type, malformed-body, and oversized-body responses.
-
-## Return an unbound route factory
-
-Expose a closure that can be mounted independently:
-
-```ts
-export const acme = {
-  routes: {
-    webhook: () => (request: Request) => handleWebhook(request),
-  },
+export const channel = {
+  routes: [{ method: 'POST', path: '/webhook', handler: webhook }],
 };
 ```
 
-```ts title="src/app.ts"
-app.mount('/webhooks/acme', acme.routes.webhook());
-```
+With `channels/acme.ts`, Flue serves this declaration at
+`/channels/acme/webhook`. Route suffixes must be non-empty, begin with `/`,
+contain no query or fragment, and remain beneath the filename-derived channel
+namespace. The namespace itself is not an endpoint.
 
-Avoid methods that depend on `this`; applications and routers commonly pass
-handlers as unbound values.
+Use `/webhook` for one ordinary webhook, `/events` for a protocol explicitly
+named an Events API, and provider-native names such as `/interactions` when the
+surface has different response semantics.
 
-## Give each event one owner
+Do not create `app.ts` merely to mount the channel. If an existing `app.ts`
+mounts `flue()` at `/api`, this route becomes `/api/channels/acme/webhook`.
 
-Treat handler registration like route ownership. Reject duplicate keys during
-setup and return a registration-specific, idempotent unsubscribe function.
-Explicit user code can fan out when needed.
+## Verify exact bytes
 
-For notification events, wait for required dispatch admission before returning
-a successful acknowledgement:
+Provider signatures usually cover the original body. Enforce a conservative
+size limit, verify the signature before parsing, and define exact behavior for
+methods, content types, malformed bodies, stale timestamps, and provider
+identity.
 
-```ts
-await dispatch(assistant, {
-  id: conversationKey(destination),
-  input: {
-    type: 'acme.message.created',
-    deliveryId: payload.deliveryId,
-    text: payload.text,
-  },
-});
+Use Web Crypto where practical, or pass a project-owned SDK client into a
+provider-specific constructor when that SDK adds ingress verification value.
+There is no universal channel client interface.
 
-return new Response(null, { status: 204 });
-```
+## Normalize and dispatch
 
-For interactions, define a small provider-native response union and validate it
-before serialization. Document missing handlers, thrown handlers, invalid
-responses, and deadline expiry.
-
-## Separate identity from authority
-
-A canonical conversation key can map a provider destination to an agent
-instance:
+Give one application callback ownership of each protocol surface. A
+discriminated event union lets the application group related provider cases:
 
 ```ts
-function conversationKey(ref: AcmeThreadRef): string {
-  return `acme:v1:${encodeURIComponent(ref.workspaceId)}:${encodeURIComponent(ref.threadId)}`;
+async function handleVerifiedEvent(c: Context, event: AcmeEvent) {
+  switch (event.type) {
+    case 'message.created':
+    case 'message.updated':
+      await dispatch(assistant, {
+        id: conversationKey(event.thread),
+        input: {
+          type: `acme.${event.type}`,
+          deliveryId: event.deliveryId,
+          text: event.text,
+        },
+      });
+      return;
+    default:
+      return;
+  }
 }
 ```
 
-Parsing this key proves only that it has the expected shape. It does not prove
-that a caller may post to the destination. Direct routes must authorize
-caller-selected ids independently.
+Preserve stable delivery identity when useful for idempotency. Keep raw
+payloads, credentials, webhook response URLs, and short-lived provider
+capabilities out of model-visible or durable input.
 
-## Pre-scope outbound tools
+Use ordinary Hono responses. A notification surface may default to an empty
+`200`; an interaction protocol may require provider-native JSON. Document that
+per surface instead of inventing a Flue-wide response object.
 
-Keep credentials and destinations outside model arguments:
+## Use the provider SDK
+
+Export the initialized SDK client from the channel module:
 
 ```ts
-function replyInThread(ref: AcmeThreadRef) {
-  const destination = { ...ref };
+export const client = new AcmeClient({
+  token: process.env.ACME_TOKEN,
+});
+```
 
+Prefer a provider-maintained REST SDK. If none exists, use the dominant
+maintained client and state that distinction. Avoid gateway or long-lived
+connection clients when the application needs only outbound HTTP calls.
+
+Validate the selected SDK against the project's actual Node or Cloudflare
+target. A first-party ingress package being portable does not imply that every
+outbound SDK is.
+
+## Define narrow tools
+
+Bind credentials and destinations in trusted application code:
+
+```ts
+export function replyInThread(ref: AcmeThreadRef) {
   return defineTool({
-    name: 'acme_reply_in_thread',
-    description: 'Reply in the bound Acme thread.',
-    parameters: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', minLength: 1 },
-      },
-      required: ['text'],
-      additionalProperties: false,
-    },
-    execute: async ({ text }, signal) => {
-      await acmeClient.postMessage(destination, text, signal);
+    name: 'reply_in_acme_thread',
+    description: 'Reply in the Acme thread bound to this agent.',
+    parameters: v.object({
+      text: v.string(),
+    }),
+    async execute({ text }) {
+      await client.messages.create({
+        threadId: ref.threadId,
+        text,
+      });
       return 'Reply posted.';
     },
   });
 }
 ```
 
-The client should use a fixed provider origin, reject absolute or
-protocol-relative authenticated destinations, constrain redirects, propagate
-caller aborts, apply a timeout, avoid automatic retries for writes, and redact
-credentials from bounded errors.
+The model selects message content, not the credential or destination.
+Conversation keys identify provider destinations; they do not authorize
+caller-selected agent ids.
 
-## Test observable contracts
+## Test the boundary
 
-Protect the boundary users depend on:
+Use representative local payloads rather than live provider services:
 
-- signed `Request` in, handler admission and provider `Response` out;
-- exact-byte verification for non-canonical JSON and UTF-8 content;
-- missing, malformed, and invalid signatures;
-- body limits, content types, methods, and consumed bodies;
-- duplicate registration and idempotent unsubscribe;
-- replay behavior and surfaced delivery identity;
-- canonical conversation-key round trips;
-- authenticated provider requests from pre-scoped tools;
-- target-runtime verification in workerd when Cloudflare is supported.
+- valid and invalid signatures over exact non-canonical bytes;
+- body limits, malformed payloads, methods, and content types;
+- provider handshakes and identity mismatch;
+- known and unknown normalized event variants;
+- default acknowledgements and required provider responses;
+- filename-derived route paths and `flue()` prefixes;
+- conversation-key round trips;
+- deferred channel-agent import cycles;
+- Node and claimed Cloudflare builds with the actual SDK import.
 
-Use the first-party package tests under `packages/github`, `packages/slack`, and
-`packages/discord` as concrete examples.
+The first-party package tests under `packages/github`, `packages/slack`, and
+`packages/discord` are concrete ingress examples.

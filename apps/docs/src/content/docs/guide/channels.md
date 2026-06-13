@@ -1,152 +1,183 @@
 ---
 title: Channels
-description: Connect GitHub, Slack, Discord, or a custom event source to Flue agents.
+description: Receive verified provider events and connect them to Flue agents.
 ---
 
-A channel connects a provider's incoming HTTP events to explicit Flue
-`dispatch(...)` calls and gives agents narrowly scoped outbound tools.
+A channel receives provider HTTP events, verifies and normalizes them, and lets
+your application decide what happens next. Flue provides ingress packages for:
 
-Flue provides first-party packages for:
+| Provider | Package         | Discovered routes                                          |
+| -------- | --------------- | ---------------------------------------------------------- |
+| GitHub   | `@flue/github`  | `/channels/<file>/webhook`                                 |
+| Slack    | `@flue/slack`   | `/channels/<file>/events`, `/channels/<file>/interactions` |
+| Discord  | `@flue/discord` | `/channels/<file>/interactions`                            |
 
-| Provider | Package         | Ingress                      |
-| -------- | --------------- | ---------------------------- |
-| GitHub   | `@flue/github`  | Webhook events               |
-| Slack    | `@flue/slack`   | Events API and interactivity |
-| Discord  | `@flue/discord` | HTTP interactions            |
+The packages own signature verification, body limits, provider handshakes,
+identity checks, typed event normalization, and acknowledgement behavior. They
+do not wrap outbound provider APIs or supply generic model tools.
 
-These packages own provider-specific signature verification, request parsing,
-acknowledgement behavior, clients, and tool factories. Your application still
-chooses the agent, instance id, and input for every accepted event.
+## Add a provider
 
-## Choose an integration
+Use `flue add` to give your coding agent the complete integration recipe:
 
-Use a first-party package when its supported events and fixed-credential model
-fit your application:
-
-- [GitHub setup](/docs/guide/channels/github/)
-- [Slack setup](/docs/guide/channels/slack/)
-- [Discord setup](/docs/guide/channels/discord/)
-
-Use [Chat SDK](/docs/guide/chat/) when you want its cross-platform
-conversation model, adapters, and chat-side state management.
-
-Build a [custom channel](/docs/guide/build-your-own-channel/) when you need a
-different provider, event surface, credential model, or protocol behavior.
-Channels are ordinary application code built from Fetch, Web Crypto,
-`dispatch(...)`, and `defineTool(...)`.
-
-## Mount verified ingress
-
-Channel routes are explicit factories mounted from `app.ts`:
-
-```ts title="src/app.ts"
-import { flue } from '@flue/runtime/routing';
-import { Hono } from 'hono';
-import { github } from './channels/github.ts';
-
-const app = new Hono();
-
-app.mount('/webhooks/github', github.routes.webhook());
-app.route('/', flue());
-
-export default app;
+```sh
+flue add github --print | codex
+flue add slack --print | codex
+flue add discord --print | codex
 ```
 
-Mount a channel route where it receives the original, unconsumed request body.
-Provider signatures cover exact bytes, so body-parsing middleware must not run
-first.
+The recipe installs the ingress package and provider SDK, then creates an
+editable `channels/<provider>.ts` module that exports:
 
-Route factories return unbound-safe Fetch handlers and can be mounted beneath
-an application-chosen prefix. They do not register routes automatically.
+- `channel`, the verified inbound integration discovered by Flue;
+- `client`, the project-owned provider SDK client;
+- any narrow `defineTool(...)` values justified by your application.
 
-## Route accepted events
+For another provider, start from its documentation:
 
-Register one handler for each provider event or interaction key:
+```sh
+flue add https://provider.example/webhooks --category channel --print | codex
+```
 
-```ts title="src/channels/github.ts"
-import { createGitHubChannel } from '@flue/github';
-import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+See the provider guides for [GitHub](/docs/guide/channels/github/),
+[Slack](/docs/guide/channels/slack/), and
+[Discord](/docs/guide/channels/discord/), or
+[build a custom channel](/docs/guide/build-your-own-channel/).
 
-export const github = createGitHubChannel({
+## File-based routing
+
+Each immediate file beneath `channels/` exports one named `channel` binding:
+
+```txt
+src/channels/github.ts  -> /channels/github/webhook
+src/channels/slack.ts   -> /channels/slack/events
+                          /channels/slack/interactions
+```
+
+The filename defines the channel namespace. Provider packages define fixed,
+non-empty route suffixes. The namespace itself, such as `/channels/github`, is
+not an endpoint.
+
+No `app.ts` is required. If an authored application mounts `flue()` beneath an
+outer prefix, channels receive that prefix with agents and workflows:
+
+```ts
+app.route('/api', flue());
+```
+
+publishes `/api/channels/github/webhook`. An authored application cannot move
+one discovered channel independently.
+
+Generated channel modules include an exact default path comment immediately
+above each handler:
+
+```ts
+// Path: /channels/github/webhook
+async webhook({ event }) {
+  // ...
+}
+```
+
+## Handle verified events
+
+The constructor receives one callback per provider protocol surface. The
+callback runs only after verification and normalization:
+
+```ts
+export const channel = createGitHubChannel({
   webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
-  token: process.env.GITHUB_TOKEN!,
+
+  // Path: /channels/github/webhook
+  async webhook({ c, event }) {
+    switch (event.type) {
+      case 'issues.opened':
+      case 'pull_request.opened':
+        await dispatch(assistant, {
+          id: channel.conversationKey({
+            owner: event.repository.owner,
+            repo: event.repository.name,
+            issueNumber:
+              event.type === 'issues.opened'
+                ? event.payload.issue.number
+                : event.payload.pullRequest.number,
+          }),
+          input: {
+            type: `github.${event.type}`,
+            deliveryId: event.deliveryId,
+          },
+        });
+        return;
+      default:
+        return;
+    }
+  },
+});
+```
+
+The callback receives the authentic Hono context as `c`. Return `c.json(...)`,
+`c.text(...)`, or another `Response` for full response control. A plain
+JSON-compatible return value becomes a JSON response. When the provider allows
+an empty acknowledgement, returning nothing produces an empty `200`.
+
+Slack surfaces are optional: omitting `events` or `interactions` means that
+route is not published. Discord interactions require a provider response.
+
+## Own the SDK and tools
+
+Provider APIs are broad and provider-specific. Initialize the established SDK
+in project code, export it, and define only the tools your agent needs:
+
+```ts
+export const client = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
 });
 
-github.on('issues.opened', async (event) => {
-  const issue = {
-    owner: event.repository.owner,
-    repo: event.repository.name,
-    issueNumber: event.payload.issue.number,
-  };
-
-  await dispatch(assistant, {
-    id: github.conversationKey(issue),
-    input: {
-      type: 'github.issues.opened',
-      deliveryId: event.deliveryId,
-      title: event.payload.issue.title,
-      body: event.payload.issue.body,
+export function commentOnIssue(ref: GitHubIssueRef) {
+  return defineTool({
+    name: 'comment_on_github_issue',
+    description: 'Comment on the GitHub issue bound to this agent.',
+    parameters: v.object({ body: v.string() }),
+    async execute({ body }) {
+      await client.rest.issues.createComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.issueNumber,
+        body,
+      });
+      return 'Comment posted.';
     },
   });
-});
+}
 ```
 
-Handlers should dispatch only the normalized fields the agent needs. Raw
-provider payloads and short-lived capabilities may contain sensitive values and
-should not be copied into model context, logs, or durable session history.
+Bind credentials and destinations in trusted application code. Let the model
+select only the content or intentionally variable options. Conversation keys
+identify destinations; they do not authorize caller-selected agent ids.
 
-Every routable key has one owner. Registering a duplicate handler fails during
-setup; compose fan-out explicitly inside the handler so partial failures and
-acknowledgement behavior remain visible.
-
-## Bind outbound tools
-
-Conversation keys are stable identifiers, not authorization capabilities.
-Trusted application code derives the destination and binds it into an outbound
-tool:
-
-```ts title="src/agents/assistant.ts"
-import { createAgent } from '@flue/runtime';
-import { github } from '../channels/github.ts';
-
-export default createAgent(({ id }) => {
-  const issue = github.parseConversationKey(id);
-
-  return {
-    tools: [github.tools.commentOnIssue(issue), github.tools.addLabels(issue)],
-  };
-});
-```
-
-The model chooses content such as comment text or labels. It does not choose
-where credentials are sent. If the agent also has a direct HTTP route, that
-route must independently authorize a caller-selected instance id before
-deriving tools from it.
-
-## Plan for acknowledgement and replay
+## Acknowledgement and replay
 
 Channel packages are stateless and do not deduplicate deliveries.
 
-| Provider             | Failure behavior                                                                                               |
-| -------------------- | -------------------------------------------------------------------------------------------------------------- |
-| GitHub               | Records failed deliveries for inspection and manual redelivery; it does not automatically retry every failure. |
-| Slack Events API     | May retry failed or timed-out deliveries and supplies retry metadata.                                          |
-| Slack interactivity  | Requires a prompt acknowledgement and is not a dependable retry queue.                                         |
-| Discord interactions | Failures are user-visible and do not provide dependable redelivery.                                            |
+| Provider             | Failure behavior                                                       |
+| -------------------- | ---------------------------------------------------------------------- |
+| GitHub               | Failed deliveries can be inspected and manually redelivered.           |
+| Slack Events API     | Slack may retry and supplies retry metadata.                           |
+| Slack interactivity  | Requires a prompt acknowledgement and is not a dependable retry queue. |
+| Discord interactions | Failures are user-visible and do not provide dependable redelivery.    |
 
-A successful channel response waits for the registered handler, including
-required dispatch admission. Handler deadlines cannot forcibly cancel arbitrary
-user code, so a timed-out handler may still finish later. When duplicate
-admission is unacceptable, claim the provider delivery id in application-owned
-durable storage before dispatch.
+Handlers wait for application work such as `dispatch(...)` admission before
+acknowledging. Deadlines cannot forcibly stop arbitrary callback code. Claim a
+delivery or interaction id in application-owned durable storage when duplicate
+admission is unacceptable.
 
-## Run on Node or Cloudflare
+Keep raw payloads, credentials, Slack `response_url` values, Discord
+interaction tokens, and other short-lived capabilities out of model context,
+logs, dispatched input, and durable session history.
 
-The first-party packages use Fetch and Web Crypto and are tested on Node and in
-workerd. They do not use target-specific state.
+## Targets
 
-GitHub can deliver webhooks to a public development endpoint. Slack request URLs
-and Discord interaction endpoints also need public HTTPS access; use a trusted
-tunnel when testing a local server. Keep development credentials separate from
-production credentials.
+The first-party ingress packages use Fetch and Web Crypto and are tested on
+Node and workerd. Outbound SDK compatibility is separate: validate the SDK and
+operations selected by your application against its actual target. Recipes may
+choose a narrower Fetch client when a provider's Node SDK is not suitable for
+Cloudflare.

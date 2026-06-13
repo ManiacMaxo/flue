@@ -1,34 +1,39 @@
 # `@flue/github`
 
-First-party GitHub webhook and outbound-tool integration for Flue.
+Verified GitHub webhook ingress for Flue applications.
 
 ```ts
 import { createGitHubChannel } from '@flue/github';
 
-const github = createGitHubChannel({
-	webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
-	token: process.env.GITHUB_TOKEN!,
-});
+export const channel = createGitHubChannel({
+  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
 
-github.on('issues.opened', async (event) => {
-	// Choose the agent, instance id, and dispatched input in application code.
+  // Path: /channels/github/webhook
+  async webhook({ c, event }) {
+    switch (event.type) {
+      case 'issues.opened':
+      case 'pull_request.opened':
+        await handleIssueOrPullRequest(event);
+        return;
+      default:
+        return c.body(null, 200);
+    }
+  },
 });
-
-app.mount('/webhooks/github', github.routes.webhook());
 ```
 
-The webhook route verifies the exact request bytes before parsing JSON or
-form-encoded payloads. Mount it before body-parsing middleware. Supported
-notifications are `issues.opened`, `issue_comment.created`, and
-`pull_request.opened`; verified `ping` and unknown event/action combinations
-are acknowledged without invoking application handlers.
+Place this export in `channels/github.ts`. Flue discovers it and serves
+`POST /channels/github/webhook` relative to the `flue()` mount.
 
-Successful acknowledgement waits for the registered handler to complete.
-GitHub expects webhook responses within 10 seconds and does not automatically
-retry failed deliveries. Use the surfaced `deliveryId` for application-owned
-idempotency and GitHub's manual redelivery flow when needed.
+The package verifies exact request bytes before parsing, handles GitHub `ping`
+internally, and normalizes known and unknown verified deliveries. Returning
+nothing produces an empty `200`; JSON values and ordinary Hono responses are
+also supported.
 
-`github.client` exposes issue/PR comment and label writes. `github.tools`
-creates the same operations with a trusted issue destination pre-bound so the
-model controls only the comment text or labels. Conversation keys are stable
-identifiers, not authorization capabilities.
+This package does not include an outbound GitHub client or model tools. Run
+`flue add github` to generate editable project code using the official
+`@octokit/rest` SDK and application-owned `defineTool(...)` values.
+
+Conversation keys are stable issue or pull-request identifiers, not
+authorization capabilities. The package is stateless and does not deduplicate
+delivery ids.

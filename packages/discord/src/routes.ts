@@ -1,15 +1,14 @@
-import { normalizeMessageComponents, normalizeModalComponents } from './components.ts';
+import type { Context, Env, Handler } from 'hono';
 import type {
 	DiscordCommandData,
-	DiscordCommandResponse,
 	DiscordComponentData,
-	DiscordComponentResponse,
 	DiscordDestinationRef,
+	DiscordHandlerResult,
+	DiscordInteraction,
 	DiscordInteractionEnvelope,
-	DiscordInteractionHandler,
+	DiscordInteractionResponse,
 	DiscordModalData,
-	DiscordModalResponse,
-	DiscordRouteHandler,
+	JsonValue,
 } from './index.ts';
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
@@ -18,40 +17,17 @@ const GUILD_CHANNEL_TYPES = new Set([0, 5]);
 const THREAD_CHANNEL_TYPES = new Set([10, 11, 12]);
 const encoder = new TextEncoder();
 
-interface DiscordInteractionsHandlerOptions {
+interface DiscordInteractionsHandlerOptions<E extends Env> {
 	publicKey: Uint8Array;
 	applicationId: string;
 	bodyLimit?: number;
 	handlerTimeoutMs?: number;
-	getCommandHandler(
-		name: string,
-	):
-		| DiscordInteractionHandler<
-				DiscordInteractionEnvelope<DiscordCommandData>,
-				DiscordCommandResponse
-		  >
-		| undefined;
-	getComponentHandler(
-		customId: string,
-	):
-		| DiscordInteractionHandler<
-				DiscordInteractionEnvelope<DiscordComponentData>,
-				DiscordComponentResponse
-		  >
-		| undefined;
-	getModalHandler(
-		customId: string,
-	):
-		| DiscordInteractionHandler<
-				DiscordInteractionEnvelope<DiscordModalData>,
-				DiscordModalResponse
-		  >
-		| undefined;
+	interactions(input: { c: Context<E>; interaction: DiscordInteraction }): DiscordHandlerResult;
 }
 
-export function createDiscordInteractionsHandler(
-	options: DiscordInteractionsHandlerOptions,
-): DiscordRouteHandler {
+export function createDiscordInteractionsHandler<E extends Env>(
+	options: DiscordInteractionsHandlerOptions<E>,
+): Handler<E> {
 	const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
 	const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
 	if (!Number.isSafeInteger(bodyLimit) || bodyLimit <= 0) {
@@ -64,17 +40,9 @@ export function createDiscordInteractionsHandler(
 		throw new TypeError('Discord route handlerTimeoutMs must not exceed 2500ms.');
 	}
 
-	return async (request) => {
-		const pathname = new URL(request.url).pathname;
-		if (pathname !== '/') return response(404);
-		if (request.method !== 'POST') {
-			return new Response(null, { status: 405, headers: { Allow: 'POST' } });
-		}
-		const mediaType = request.headers
-			.get('content-type')
-			?.split(';', 1)[0]
-			?.trim()
-			.toLowerCase();
+	return async (c) => {
+		const request = c.req.raw;
+		const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
 		if (mediaType !== 'application/json') return response(415);
 
 		const contentLength = request.headers.get('content-length');
@@ -111,51 +79,41 @@ export function createDiscordInteractionsHandler(
 		if (!applicationId) return response(400);
 		if (applicationId !== options.applicationId) return response(403);
 
-		if (type !== 2 && type !== 3 && type !== 5) return response(404);
-
 		const common = normalizeCommon(raw, applicationId);
-		if (!common) return response(400);
+		if (!common || type === undefined) return response(400);
 
+		let interaction: DiscordInteraction;
 		if (type === 2) {
 			const data = normalizeCommandData(raw);
 			if (!data) return response(400);
-			const handler = options.getCommandHandler(data.name);
-			if (!handler) return response(404);
-			const outcome = await runHandler(
-				() => handler({ ...common, data, raw }),
-				handlerTimeoutMs,
-			);
-			return serializeOutcome(outcome, 'command');
-		}
-
-		if (type === 3) {
+			interaction = { ...common, type: 'command', data, raw };
+		} else if (type === 3) {
 			const data = normalizeComponentData(raw);
 			if (!data) return response(400);
-			const handler = options.getComponentHandler(data.customId);
-			if (!handler) return response(404);
-			const outcome = await runHandler(
-				() => handler({ ...common, data, raw }),
-				handlerTimeoutMs,
-			);
-			return serializeOutcome(outcome, 'component');
+			interaction = { ...common, type: 'component', data, raw };
+		} else if (type === 5) {
+			const data = normalizeModalData(raw);
+			if (!data) return response(400);
+			interaction = { ...common, type: 'modal', data, raw };
+		} else {
+			interaction = { ...common, type: 'unknown', interactionType: type, raw };
 		}
 
-		const data = normalizeModalData(raw);
-		if (!data) return response(400);
-		const handler = options.getModalHandler(data.customId);
-		if (!handler) return response(404);
 		const outcome = await runHandler(
-			() => handler({ ...common, data, raw }),
+			() => options.interactions({ c, interaction }),
 			handlerTimeoutMs,
 		);
-		return serializeOutcome(outcome, 'modal');
+		if (outcome.type !== 'success') return response(500);
+		if (outcome.value instanceof Response) return outcome.value;
+		if (!isJsonValue(outcome.value)) return response(500);
+		return Response.json(outcome.value);
 	};
 }
 
 function normalizeCommon(
 	raw: Record<string, unknown>,
 	applicationId: string,
-): Omit<DiscordInteractionEnvelope<never>, 'data' | 'raw'> | undefined {
+): Omit<DiscordInteractionEnvelope<string, never>, 'type' | 'data' | 'raw'> | undefined {
 	const id = readString(raw, 'id');
 	const token = readString(raw, 'token');
 	const destination = normalizeDestination(raw);
@@ -170,8 +128,7 @@ function normalizeDestination(raw: Record<string, unknown>): DiscordDestinationR
 	const channel = readRecord(raw, 'channel');
 	const channelType = channel && readInteger(channel, 'type');
 	const nestedChannelId = channel && readString(channel, 'id');
-	if (!channelId) return undefined;
-	if (!nestedChannelId || nestedChannelId !== channelId) return undefined;
+	if (!channelId || !nestedChannelId || nestedChannelId !== channelId) return undefined;
 
 	if (guildId) {
 		if (context !== undefined && context !== 0) return undefined;
@@ -183,9 +140,7 @@ function normalizeDestination(raw: Record<string, unknown>): DiscordDestinationR
 			type: 'guild',
 			guildId,
 			channelId,
-			channelKind: channelType !== undefined && THREAD_CHANNEL_TYPES.has(channelType)
-				? 'thread'
-				: 'channel',
+			channelKind: THREAD_CHANNEL_TYPES.has(channelType) ? 'thread' : 'channel',
 		};
 	}
 
@@ -208,7 +163,7 @@ function normalizeComponentData(raw: Record<string, unknown>): DiscordComponentD
 	const data = readRecord(raw, 'data');
 	const customId = data && readString(data, 'custom_id');
 	const componentType = data && readInteger(data, 'component_type');
-	if (!data || !customId || componentType !== 2) return undefined;
+	if (!data || !customId || componentType === undefined) return undefined;
 	const values = data.values;
 	if (
 		values !== undefined &&
@@ -248,10 +203,7 @@ function collectModalFields(components: readonly unknown[]): Array<{
 	return fields;
 }
 
-type HandlerOutcome<T> =
-	| { type: 'success'; value: T }
-	| { type: 'failure' }
-	| { type: 'timeout' };
+type HandlerOutcome<T> = { type: 'success'; value: T } | { type: 'failure' } | { type: 'timeout' };
 
 async function runHandler<T>(
 	handler: () => T | Promise<T>,
@@ -272,128 +224,23 @@ async function runHandler<T>(
 	return outcome;
 }
 
-function serializeOutcome(
-	outcome: HandlerOutcome<unknown>,
-	kind: 'command' | 'component' | 'modal',
-): Response {
-	if (outcome.type !== 'success') return response(500);
-	const serialized = serializeInteractionResponse(outcome.value, kind);
-	return serialized ? Response.json(serialized) : response(500);
-}
-
-function serializeInteractionResponse(
+function isJsonValue(
 	value: unknown,
-	kind: 'command' | 'component' | 'modal',
-): Record<string, unknown> | undefined {
-	if (!isRecord(value)) return undefined;
-	if (value.type === 'message') {
-		const message = serializeMessage(value.message);
-		if (!message || !isOptionalBoolean(value.ephemeral)) return undefined;
-		return {
-			type: 4,
-			data: {
-				...message,
-				allowed_mentions: message.allowed_mentions ?? { parse: [] },
-				...(value.ephemeral === true ? { flags: 64 } : {}),
-			},
-		};
+	seen = new Set<object>(),
+): value is JsonValue | DiscordInteractionResponse {
+	if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
+	if (typeof value === 'number') return Number.isFinite(value);
+	if (typeof value !== 'object') return false;
+	if (seen.has(value)) return false;
+	if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) return false;
+	seen.add(value);
+	try {
+		return Array.isArray(value)
+			? value.every((item) => isJsonValue(item, seen))
+			: Object.values(value).every((item) => isJsonValue(item, seen));
+	} finally {
+		seen.delete(value);
 	}
-	if (value.type === 'update_message') {
-		if (kind === 'command') return undefined;
-		const message = serializeMessage(value.message);
-		return message
-			? {
-					type: 7,
-					data: {
-						...message,
-						allowed_mentions: message.allowed_mentions ?? { parse: [] },
-					},
-				}
-			: undefined;
-	}
-	if (value.type === 'modal') {
-		if (kind === 'modal') return undefined;
-		const customId = value.customId;
-		const title = value.title;
-		const components = value.components;
-		const normalizedComponents = normalizeModalComponents(components);
-		if (
-			!isBoundedString(customId, 1, 100) ||
-			!isBoundedString(title, 1, 45) ||
-			!normalizedComponents
-		) {
-			return undefined;
-		}
-		return {
-			type: 9,
-			data: { custom_id: customId, title, components: normalizedComponents },
-		};
-	}
-	return undefined;
-}
-
-function serializeMessage(value: unknown): Record<string, unknown> | undefined {
-	if (!isRecord(value) || !isBoundedString(value.content, 1, 2_000)) {
-		return undefined;
-	}
-	const components =
-		value.components === undefined ? undefined : normalizeMessageComponents(value.components);
-	if (value.components !== undefined && !components) return undefined;
-	if (value.allowedMentions !== undefined && !isAllowedMentions(value.allowedMentions)) {
-		return undefined;
-	}
-	return {
-		content: value.content,
-		...(components === undefined ? {} : { components }),
-		...(value.allowedMentions === undefined
-			? {}
-			: {
-					allowed_mentions: {
-						...(value.allowedMentions.parse === undefined
-							? {}
-							: { parse: value.allowedMentions.parse }),
-						...(value.allowedMentions.users === undefined
-							? {}
-							: { users: value.allowedMentions.users }),
-						...(value.allowedMentions.roles === undefined
-							? {}
-							: { roles: value.allowedMentions.roles }),
-					},
-				}),
-	};
-}
-
-function isBoundedString(value: unknown, minimum: number, maximum: number): value is string {
-	return typeof value === 'string' && value.length >= minimum && value.length <= maximum;
-}
-
-function isAllowedMentions(value: unknown): value is {
-	parse?: Array<'users' | 'roles' | 'everyone'>;
-	users?: string[];
-	roles?: string[];
-} {
-	if (!isRecord(value)) return false;
-	if (
-		value.parse !== undefined &&
-		(!Array.isArray(value.parse) ||
-			value.parse.some(
-				(item) => item !== 'users' && item !== 'roles' && item !== 'everyone',
-			))
-	) {
-		return false;
-	}
-	if (!isOptionalStringArray(value.users) || !isOptionalStringArray(value.roles)) return false;
-	if (value.parse?.includes('users') && value.users !== undefined) return false;
-	if (value.parse?.includes('roles') && value.roles !== undefined) return false;
-	return true;
-}
-
-function isOptionalStringArray(value: unknown): boolean {
-	return value === undefined || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
-}
-
-function isOptionalBoolean(value: unknown): boolean {
-	return value === undefined || typeof value === 'boolean';
 }
 
 async function readBody(request: Request, bodyLimit: number): Promise<Uint8Array | undefined> {
@@ -452,12 +299,7 @@ async function verifySignature(
 			false,
 			['verify'],
 		);
-		return crypto.subtle.verify(
-			'Ed25519',
-			key,
-			toArrayBuffer(signature),
-			toArrayBuffer(signed),
-		);
+		return crypto.subtle.verify('Ed25519', key, toArrayBuffer(signature), toArrayBuffer(signed));
 	} catch {
 		return false;
 	}

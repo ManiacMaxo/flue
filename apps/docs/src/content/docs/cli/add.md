@@ -34,9 +34,10 @@ With no arguments, the command lists known connectors. With a connector name, it
 
 ## Connector categories
 
-| Category  | Description                                                      |
-| --------- | ---------------------------------------------------------------- |
-| `sandbox` | Build a sandbox connector from provider documentation or source. |
+| Category  | Description                                                        |
+| --------- | ------------------------------------------------------------------ |
+| `sandbox` | Build a sandbox connector from provider documentation or source.   |
+| `channel` | Add verified provider ingress, an SDK client, and app-owned tools. |
 
 Run `flue add` without arguments to list the currently known connector recipes.
 
@@ -46,9 +47,14 @@ Run `flue add` without arguments to list the currently known connector recipes.
 flue add
 flue add daytona --print
 flue add daytona --print | claude
+flue add github --print | codex
+flue add slack --print | codex
+flue add discord --print | codex
 flue add @cloudflare/shell --print | opencode
 flue add https://e2b.dev --category sandbox --print | claude
 flue add ./vendor/provider-docs --category sandbox --print | codex
+flue add https://docs.stripe.com/webhooks --category channel --print | codex
 ```
 
-See [Sandboxes](/docs/guide/sandboxes/) and the [Ecosystem](/docs/ecosystem/overview/) for connector guidance.
+See [Sandboxes](/docs/guide/sandboxes/), [Channels](/docs/guide/channels/), and
+the [Ecosystem](/docs/ecosystem/overview/) for connector guidance.

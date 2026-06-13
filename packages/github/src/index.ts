@@ -1,32 +1,31 @@
-import { defineTool, type ToolDefinition } from '@flue/runtime/tool';
-import { createGitHubClient } from './client.ts';
-import {
-	DuplicateGitHubHandlerError,
-	InvalidGitHubConversationKeyError,
-	InvalidGitHubInputError,
-} from './errors.ts';
+import type { Context, Env, Handler } from 'hono';
+import { InvalidGitHubConversationKeyError, InvalidGitHubInputError } from './errors.ts';
 import { createGitHubWebhookHandler } from './webhook.ts';
 
-export type { GitHubRateLimit } from './errors.ts';
-export {
-	DuplicateGitHubHandlerError,
-	GitHubApiError,
-	GitHubRateLimitError,
-	GitHubTimeoutError,
-	InvalidGitHubConversationKeyError,
-	InvalidGitHubInputError,
-} from './errors.ts';
+export { InvalidGitHubConversationKeyError, InvalidGitHubInputError } from './errors.ts';
 
-/** Credentials and transport settings for one fixed GitHub integration. */
-export interface GitHubChannelOptions {
+export type JsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| JsonValue[]
+	| { [key: string]: JsonValue };
+
+export interface ChannelRoute<E extends Env = Env> {
+	readonly method: string;
+	readonly path: string;
+	readonly handler: Handler<E>;
+}
+
+/** Ingress configuration for one fixed GitHub webhook. */
+export interface GitHubChannelOptions<E extends Env = Env> {
 	/** Secret configured on the GitHub webhook. */
 	webhookSecret: string;
-	/** Token used for issue and pull-request API writes. */
-	token: string;
-	/** Fetch implementation used by the outbound client. Defaults to `globalThis.fetch`. */
-	fetch?: typeof globalThis.fetch;
-	/** Outbound request timeout in milliseconds. Defaults to 10 seconds. */
-	requestTimeoutMs?: number;
+	/** Maximum request-body size in bytes. Defaults to 25 MiB. */
+	bodyLimit?: number;
+	/** Receives every verified non-ping GitHub delivery. */
+	webhook(input: GitHubWebhookHandlerInput<E>): GitHubWebhookHandlerResult;
 }
 
 /** Canonical issue or pull-request destination. Pull requests use their issue number. */
@@ -71,52 +70,48 @@ export interface GitHubWebhookEvent<TType extends string, TPayload> {
 	raw: unknown;
 }
 
+export interface GitHubUnknownEvent {
+	type: 'unknown';
+	/** Original `X-GitHub-Event` value. */
+	event: string;
+	/** Provider action when present. */
+	action?: string;
+	deliveryId: string;
+	hookId?: string;
+	installationTarget?: {
+		id: string;
+		type: string;
+	};
+	installationId?: number;
+	/** Parsed provider payload. Treat this as untrusted provider data. */
+	raw: unknown;
+}
+
 export interface GitHubEvents {
 	'issues.opened': GitHubWebhookEvent<'issues.opened', GitHubIssuesOpenedPayload>;
 	'issue_comment.created': GitHubWebhookEvent<
 		'issue_comment.created',
 		GitHubIssueCommentCreatedPayload
 	>;
-	'pull_request.opened': GitHubWebhookEvent<
-		'pull_request.opened',
-		GitHubPullRequestOpenedPayload
-	>;
+	'pull_request.opened': GitHubWebhookEvent<'pull_request.opened', GitHubPullRequestOpenedPayload>;
 }
 
-export type GitHubEventName = keyof GitHubEvents;
-export type GitHubNotificationHandler<TEvent> = (event: TEvent) => void | Promise<void>;
-export type GitHubRouteHandler = (request: Request) => Promise<Response>;
+export type GitHubEvent = GitHubEvents[keyof GitHubEvents] | GitHubUnknownEvent;
 
-export interface GitHubWebhookRouteOptions {
-	/** Maximum request-body size in bytes. Defaults to 25 MiB. */
-	bodyLimit?: number;
+export interface GitHubWebhookHandlerInput<E extends Env = Env> {
+	c: Context<E>;
+	event: GitHubEvent;
 }
 
-/** Fixed-origin GitHub REST writes. Methods do not retry automatically. */
-export interface GitHubClient {
-	commentOnIssue(ref: GitHubIssueRef, text: string, signal?: AbortSignal): Promise<void>;
-	addLabels(ref: GitHubIssueRef, labels: string[], signal?: AbortSignal): Promise<void>;
-}
+type GitHubWebhookHandlerValue = undefined | JsonValue | Response;
 
-/** Verified ingress, outbound client/tools, and canonical identity helpers. */
-export interface GitHubChannel {
-	readonly routes: {
-		webhook(options?: GitHubWebhookRouteOptions): GitHubRouteHandler;
-	};
-	readonly client: GitHubClient;
-	readonly tools: {
-		commentOnIssue(ref: GitHubIssueRef): ToolDefinition;
-		addLabels(ref: GitHubIssueRef): ToolDefinition;
-	};
-	/**
-	 * Registers the sole handler for one supported event key.
-	 *
-	 * The returned unsubscribe function is registration-specific and idempotent.
-	 */
-	on<TKey extends GitHubEventName>(
-		type: TKey,
-		handler: GitHubNotificationHandler<GitHubEvents[TKey]>,
-	): () => void;
+export type GitHubWebhookHandlerResult =
+	| GitHubWebhookHandlerValue
+	| Promise<GitHubWebhookHandlerValue>;
+
+/** Verified ingress and canonical identity helpers. */
+export interface GitHubChannel<E extends Env = Env> {
+	readonly routes: readonly ChannelRoute<E>[];
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: GitHubIssueRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -124,97 +119,25 @@ export interface GitHubChannel {
 }
 
 /**
- * Creates a fixed-credential GitHub channel.
+ * Creates a fixed-webhook GitHub channel.
  *
- * Successful webhook acknowledgement waits for the registered handler to
- * finish. The channel is stateless and does not deduplicate delivery ids.
+ * Successful acknowledgement waits for the configured handler to finish. The
+ * channel is stateless and does not deduplicate delivery ids.
  */
-export function createGitHubChannel(options: GitHubChannelOptions): GitHubChannel {
+export function createGitHubChannel<E extends Env = Env>(
+	options: GitHubChannelOptions<E>,
+): GitHubChannel<E> {
 	validateOptions(options);
 	const webhookSecret = options.webhookSecret;
-	const clientOptions = {
+	const webhook = options.webhook;
+	const webhookHandler = createGitHubWebhookHandler<E>({
 		webhookSecret,
-		token: options.token,
-		fetch: options.fetch,
-		requestTimeoutMs: options.requestTimeoutMs,
-	};
-	const handlers = new Map<
-		GitHubEventName,
-		GitHubNotificationHandler<GitHubEvents[GitHubEventName]>
-	>();
-	const client = createGitHubClient(clientOptions);
+		bodyLimit: options.bodyLimit,
+		webhook,
+	});
 
-	const channel: GitHubChannel = {
-		routes: {
-				webhook: (routeOptions) =>
-					createGitHubWebhookHandler({
-						webhookSecret,
-					bodyLimit: routeOptions?.bodyLimit,
-					getHandler: (type) => handlers.get(type),
-				}),
-		},
-		client,
-		tools: {
-			commentOnIssue: (ref) => {
-				assertIssueRef(ref);
-				const boundRef = snapshotIssueRef(ref);
-				return defineTool({
-					name: 'github_comment_on_issue',
-					description: 'Post a comment to the bound GitHub issue or pull request.',
-					parameters: {
-						type: 'object',
-						properties: { text: { type: 'string', minLength: 1 } },
-						required: ['text'],
-						additionalProperties: false,
-					},
-					execute: async ({ text }, signal) => {
-						await client.commentOnIssue(boundRef, text, signal);
-						return 'Comment posted.';
-					},
-				});
-			},
-			addLabels: (ref) => {
-				assertIssueRef(ref);
-				const boundRef = snapshotIssueRef(ref);
-				return defineTool({
-					name: 'github_add_labels',
-					description: 'Add labels to the bound GitHub issue or pull request.',
-					parameters: {
-						type: 'object',
-						properties: {
-							labels: {
-								type: 'array',
-								items: { type: 'string', minLength: 1 },
-								minItems: 1,
-							},
-						},
-						required: ['labels'],
-						additionalProperties: false,
-					},
-					execute: async ({ labels }, signal) => {
-						await client.addLabels(boundRef, labels, signal);
-						return 'Labels added.';
-					},
-				});
-			},
-		},
-		on(type, handler) {
-			if (typeof handler !== 'function') {
-				throw new TypeError(`GitHub handler for "${type}" must be a function.`);
-			}
-			if (handlers.has(type)) {
-				throw new DuplicateGitHubHandlerError(type);
-			}
-			const registeredHandler =
-				handler as GitHubNotificationHandler<GitHubEvents[GitHubEventName]>;
-			handlers.set(type, registeredHandler);
-			let active = true;
-			return () => {
-				if (!active) return;
-				active = false;
-				if (handlers.get(type) === registeredHandler) handlers.delete(type);
-			};
-		},
+	const channel: GitHubChannel<E> = {
+		routes: [{ method: 'POST', path: '/webhook', handler: webhookHandler }],
 		conversationKey(ref) {
 			assertIssueRef(ref);
 			return `github:v1:owner:${encodeURIComponent(ref.owner)}:repo:${encodeURIComponent(ref.repo)}:issue:${ref.issueNumber}`;
@@ -244,24 +167,15 @@ export function createGitHubChannel(options: GitHubChannelOptions): GitHubChanne
 	return channel;
 }
 
-function validateOptions(options: GitHubChannelOptions): void {
+function validateOptions<E extends Env>(options: GitHubChannelOptions<E>): void {
 	if (!options || typeof options !== 'object') {
 		throw new TypeError('createGitHubChannel() requires an options object.');
 	}
 	if (typeof options.webhookSecret !== 'string' || options.webhookSecret.length === 0) {
 		throw new TypeError('createGitHubChannel() requires a non-empty webhookSecret.');
 	}
-	if (typeof options.token !== 'string' || options.token.length === 0) {
-		throw new TypeError('createGitHubChannel() requires a non-empty token.');
-	}
-	if (options.fetch !== undefined && typeof options.fetch !== 'function') {
-		throw new TypeError('createGitHubChannel() fetch must be a function.');
-	}
-	if (
-		options.requestTimeoutMs !== undefined &&
-		(!Number.isSafeInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
-	) {
-		throw new TypeError('createGitHubChannel() requestTimeoutMs must be a positive integer.');
+	if (typeof options.webhook !== 'function') {
+		throw new TypeError('createGitHubChannel() requires a webhook handler.');
 	}
 }
 
@@ -278,12 +192,4 @@ function assertPathSegment(value: unknown, field: string): asserts value is stri
 	if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
 		throw new InvalidGitHubInputError(field);
 	}
-}
-
-function snapshotIssueRef(ref: GitHubIssueRef): GitHubIssueRef {
-	return {
-		owner: ref.owner,
-		repo: ref.repo,
-		issueNumber: ref.issueNumber,
-	};
 }

@@ -7,12 +7,14 @@
 		"check:types": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@discordjs/rest": "^2.6.1",
 		"@flue/discord": "workspace:*",
 		"@flue/runtime": "workspace:*",
-		"hono": "4.12.22"
+		"discord-api-types": "^0.38.48"
 	},
 	"devDependencies": {
 		"@flue/cli": "workspace:*",
+		"agents": "^0.14.1",
 		"typescript": "^6.0.3"
 	}
 }

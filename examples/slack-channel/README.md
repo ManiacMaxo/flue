@@ -1,9 +1,10 @@
 # Slack channel example
 
-This example mounts separately verified Events API and interactivity routes,
-explicitly dispatches app mentions and message-backed actions, derives a
-canonical thread instance id, and pre-scopes Slack reply and root-reaction tools
-to that destination.
+This example receives verified Slack Events API requests at
+`/channels/slack/events`, explicitly dispatches app mentions, derives a
+canonical thread instance id, and defines one application-owned Slack SDK tool
+bound to that thread. The optional `/channels/slack/interactions` surface is
+shown commented out in the channel module and is not published.
 
 `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_APP_ID`, and `SLACK_TEAM_ID` are required when the built application starts. Builds and type checks do not require live credentials.
 
@@ -18,15 +19,20 @@ and may still admit work after a failure response; Slack may retry Events API
 deliveries, so applications requiring uniqueness must claim `eventId` in
 durable application storage before dispatch.
 
-Block actions return an empty acknowledgement. Visible follow-up messages use
-the bot-token tools bound to the action's message thread; agent-driven
-`response_url` use is intentionally deferred. Reactions target the bound thread
-root.
-
 The bot token's ownership by the configured app/workspace is a trusted
 configuration assertion in v1. The package does not perform startup `auth.test`
 network calls.
 
-The channel module imports the agent and the agent imports the channel. This cycle is safe only because dispatch and tool access are deferred into handlers and the agent initializer. A routing module that imports both can avoid the cycle.
+The channel module exports both the ingress `channel` and the project-owned
+`WebClient`. The reply tool is deliberately narrow application policy, not a
+generic tool supplied by `@flue/slack`.
+
+This example uses the Fetch-based `@slack/web-api` v8 release candidate. Its
+typed `chat.postMessage()` path is exercised in workerd with Cloudflare's
+required `nodejs_compat` flag and without contacting Slack.
+
+The channel module imports the agent and the agent imports the channel. This
+cycle is safe because the imported bindings are read only inside the events
+callback and agent initializer, after module evaluation.
 
 Conversation keys validate syntax, not authorization. This agent is intentionally dispatch-only. Any direct agent route must independently authorize the caller-selected instance id before deriving outbound tools from it.

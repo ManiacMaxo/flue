@@ -592,7 +592,12 @@ function isSourceStructurePath(root: string, sourceRoot: string, relPath: string
 			: null
 		: relPath;
 	if (sourceRelative === null) return false;
-	if (sourceRelative.startsWith('agents/') || sourceRelative.startsWith('workflows/')) return true;
+	if (
+		sourceRelative.startsWith('agents/') ||
+		sourceRelative.startsWith('workflows/') ||
+		sourceRelative.startsWith('channels/')
+	)
+		return true;
 	return /^(?:app|cloudflare)\.(?:ts|mts|js|mjs)$/.test(sourceRelative);
 }
 

@@ -1,5 +1,5 @@
 import { toJsonSchema } from '@valibot/to-json-schema';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import {
 	type DescribeRouteOptions,
@@ -25,9 +25,10 @@ import type {
 	DispatchReceipt,
 	NamedAgentDispatchRequest,
 } from '../types.ts';
+import type { AttachedAgentSubmissionAdmission } from './agent-submissions.ts';
 import { enqueueDispatch } from './dispatch.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
-import type { AttachedAgentSubmissionAdmission } from './agent-submissions.ts';
+import { agentStreamPath, type EventStreamStore, runStreamPath } from './event-stream-store.ts';
 import {
 	type CreateContextFn,
 	handleAgentRequest,
@@ -36,14 +37,13 @@ import {
 } from './handle-agent.ts';
 import { handleStreamHead, handleStreamRead } from './handle-stream-routes.ts';
 import { generateWorkflowRunId } from './ids.ts';
-import { agentStreamPath, runStreamPath, type EventStreamStore } from './event-stream-store.ts';
 import type { RunPointer, RunStore } from './run-store.ts';
 
 import {
 	AgentAdmissionResponseSchema,
 	AgentInvocationResponseSchema,
-	DirectAgentPayloadSchema,
 	AgentRouteParamSchema,
+	DirectAgentPayloadSchema,
 	ErrorEnvelopeSchema,
 	InvocationQuerySchema,
 	WorkflowAdmissionResponseSchema,
@@ -60,6 +60,7 @@ export interface FlueRuntime {
 	workflowHandlers?: Record<string, WorkflowHandler>;
 	agentRouteMiddleware?: Record<string, MiddlewareHandler>;
 	workflowRouteMiddleware?: Record<string, MiddlewareHandler>;
+	channelHandlers?: Record<string, Record<string, (c: Context) => Response | Promise<Response>>>;
 
 	/**
 	 * Per-target context factory. Required when {@link target} is `'node'`.
@@ -158,8 +159,6 @@ interface FlueManifest {
 		transports: { http?: boolean };
 	}>;
 }
-
-
 
 /**
  * Accepts input for asynchronous delivery to a continuing agent session.
@@ -291,6 +290,8 @@ export function flue(): Hono {
 	// Non-POSTs still reach the canonical Flue 405 envelope instead of
 	// Hono's default 404 for unmatched methods.
 	app.all('/agents/:name/:id', agentRouteHandler);
+	app.all('/channels/:name', channelRouteHandler);
+	app.all('/channels/:name/:suffix{.+}', channelRouteHandler);
 	// DS stream endpoints for run events.
 	app.all('/runs/:runId', runStreamReadHandler);
 
@@ -463,7 +464,6 @@ function agentRouteSpec() {
 	};
 }
 
-
 const workflowRouteHandler: MiddlewareHandler = async (c) => {
 	const rt = runtimeConfig;
 	if (!rt) {
@@ -589,6 +589,49 @@ const agentRouteHandler: MiddlewareHandler = async (c) => {
 			path: new URL(c.req.url).pathname,
 		});
 	});
+};
+
+const channelRouteHandler: MiddlewareHandler = async (c) => {
+	const rt = runtimeConfig;
+	if (!rt) {
+		throw new Error(
+			'[flue] flue() route invoked before runtime was configured. ' +
+				'This usually means flue() was used outside a Flue-built server entry.',
+		);
+	}
+
+	const name = c.req.param('name') ?? '';
+	const remainder = c.req.param('suffix') ?? '';
+	const suffix = remainder.length > 0 ? `/${remainder}` : '';
+	const routes = rt.channelHandlers?.[name];
+	if (!routes || suffix.length === 0) {
+		throw new RouteNotFoundError({
+			method: c.req.method,
+			path: new URL(c.req.url).pathname,
+		});
+	}
+
+	const handler = routes[`${c.req.method} ${suffix}`];
+	if (!handler) {
+		const allowed = Object.keys(routes)
+			.filter((key) => key.endsWith(` ${suffix}`))
+			.map((key) => key.slice(0, key.indexOf(' ')));
+		if (allowed.length > 0) {
+			throw new MethodNotAllowedError({ method: c.req.method, allowed });
+		}
+		throw new RouteNotFoundError({
+			method: c.req.method,
+			path: new URL(c.req.url).pathname,
+		});
+	}
+
+	const response = await handler(c);
+	if (!(response instanceof Response)) {
+		throw new TypeError(
+			`[flue] Channel "${name}" handler for ${c.req.method} ${suffix} must return a Response.`,
+		);
+	}
+	return response;
 };
 
 const runStreamReadHandler: MiddlewareHandler = async (c) => {
@@ -753,17 +796,13 @@ function normalizeAttachedRequest(request: Request, pathname: string): Request {
 	return new Request(url, request);
 }
 
-function registeredAgentsForTransport(
-	rt: FlueRuntime,
-): readonly string[] {
+function registeredAgentsForTransport(rt: FlueRuntime): readonly string[] {
 	return (rt.manifest?.agents ?? [])
 		.filter((agent) => agent.transports.http === true)
 		.map((agent) => agent.name);
 }
 
-function registeredWorkflowsForTransport(
-	rt: FlueRuntime,
-): readonly string[] {
+function registeredWorkflowsForTransport(rt: FlueRuntime): readonly string[] {
 	return (rt.manifest?.workflows ?? [])
 		.filter((workflow) => workflow.transports.http === true)
 		.map((workflow) => workflow.name);

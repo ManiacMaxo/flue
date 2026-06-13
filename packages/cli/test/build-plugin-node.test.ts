@@ -59,12 +59,26 @@ describe('NodePlugin', () => {
 		expect(entry).toContain("process.on('SIGINT'");
 		expect(entry).toContain("process.on('SIGTERM'");
 	});
+
+	it('imports discovered channels and configures their normalized handlers', () => {
+		const entry = new NodePlugin().generateEntryPoint(
+			testBuildContext({
+				agents: [{ name: 'assistant', filePath: '/fixture/agents/assistant.ts' }],
+				channels: [{ name: 'slack', filePath: '/fixture/channels/slack.ts' }],
+			}),
+		);
+
+		expect(entry).toContain('"/fixture/channels/slack.ts"');
+		expect(entry).toContain('normalizeBuiltModules(agentModules, workflowModules, channelModules)');
+		expect(entry).toContain('channelHandlers,');
+	});
 });
 
 function testBuildContext(overrides: Partial<BuildContext> = {}): BuildContext {
 	return {
 		agents: [],
 		workflows: [],
+		channels: [],
 		root: '/fixture',
 		output: '/fixture/dist',
 		runtimeVersion: '0.0.0-test',

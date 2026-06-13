@@ -1,106 +1,73 @@
 ---
 title: GitHub Channel API
-description: Reference for @flue/github.
-lastReviewedAt: 2026-06-12
+description: Reference for verified GitHub webhook ingress from @flue/github.
+lastReviewedAt: 2026-06-13
 ---
 
-Import the GitHub channel API from `@flue/github`.
+Import from `@flue/github`.
 
 ## `createGitHubChannel()`
 
 ```ts
-function createGitHubChannel(options: GitHubChannelOptions): GitHubChannel;
+function createGitHubChannel<E extends Env = Env>(
+  options: GitHubChannelOptions<E>,
+): GitHubChannel<E>;
 ```
 
-Creates one fixed-credential GitHub integration. The channel is stateless and
-does not deduplicate delivery ids.
+Creates one stateless GitHub webhook channel. The callback is stored during
+construction and runs only for a verified non-ping delivery.
 
-### `GitHubChannelOptions`
+## `GitHubChannelOptions`
 
-| Field              | Type                      | Default            |
-| ------------------ | ------------------------- | ------------------ |
-| `webhookSecret`    | `string`                  | Required           |
-| `token`            | `string`                  | Required           |
-| `fetch`            | `typeof globalThis.fetch` | `globalThis.fetch` |
-| `requestTimeoutMs` | `number`                  | `10000`            |
+```ts
+interface GitHubChannelOptions<E extends Env = Env> {
+  webhookSecret: string;
+  bodyLimit?: number;
+  webhook(input: {
+    c: Context<E>;
+    event: GitHubEvent;
+  }): void | JsonValue | Response | Promise<void | JsonValue | Response>;
+}
+```
+
+| Field           | Description                                     |
+| --------------- | ----------------------------------------------- |
+| `webhookSecret` | Secret configured on the GitHub webhook.        |
+| `bodyLimit`     | Maximum request body in bytes. Default: 25 MiB. |
+| `webhook`       | Receives every verified non-ping delivery.      |
+
+Returning nothing produces an empty `200`. A JSON-compatible value becomes a
+JSON response. An ordinary Hono or Fetch `Response` passes through unchanged.
+Thrown callbacks produce a server error.
 
 ## `GitHubChannel`
 
-### `routes.webhook()`
-
 ```ts
-webhook(options?: GitHubWebhookRouteOptions): GitHubRouteHandler;
+interface GitHubChannel<E extends Env = Env> {
+  readonly routes: readonly ChannelRoute<E>[];
+  conversationKey(ref: GitHubIssueRef): string;
+  parseConversationKey(id: string): GitHubIssueRef;
+}
 ```
 
-Returns an unbound-safe Fetch handler. `bodyLimit` is measured in bytes and
-defaults to 25 MiB.
+`routes` contains one `POST /webhook` declaration used by discovered channel
+routing. A file named `channels/github.ts` is served at
+`/channels/github/webhook` relative to the `flue()` mount.
 
-The route accepts `POST` JSON or form-encoded webhook payloads. Verified `ping`
-and ignored event/action combinations return `204`.
+Conversation keys are canonical identifiers, not authorization capabilities.
+Pull requests use their issue number.
 
-### `on()`
+## Events
 
 ```ts
-on<TKey extends GitHubEventName>(
-  type: TKey,
-  handler: GitHubNotificationHandler<GitHubEvents[TKey]>,
-): () => void;
+type GitHubEvent = GitHubEvents[keyof GitHubEvents] | GitHubUnknownEvent;
 ```
 
-Registers the sole handler for one event key and returns an idempotent,
-registration-specific unsubscribe function.
-
-Supported keys:
+Known variants:
 
 - `issues.opened`
 - `issue_comment.created`
 - `pull_request.opened`
-
-Successful acknowledgement waits for the handler to finish.
-
-### `client`
-
-```ts
-interface GitHubClient {
-  commentOnIssue(ref: GitHubIssueRef, text: string, signal?: AbortSignal): Promise<void>;
-  addLabels(ref: GitHubIssueRef, labels: string[], signal?: AbortSignal): Promise<void>;
-}
-```
-
-Writes use the fixed GitHub API origin and are not retried automatically.
-
-### `tools`
-
-```ts
-commentOnIssue(ref: GitHubIssueRef): ToolDefinition;
-addLabels(ref: GitHubIssueRef): ToolDefinition;
-```
-
-Both factories snapshot the trusted destination. Model arguments contain only
-comment text or labels.
-
-### `GitHubIssueRef`
-
-```ts
-interface GitHubIssueRef {
-  owner: string;
-  repo: string;
-  issueNumber: number;
-}
-```
-
-Pull requests use their issue number.
-
-### Conversation keys
-
-```ts
-conversationKey(ref: GitHubIssueRef): string;
-parseConversationKey(id: string): GitHubIssueRef;
-```
-
-Keys are canonical identifiers, not authorization capabilities.
-
-## Event envelope
 
 ```ts
 interface GitHubWebhookEvent<TType extends string, TPayload> {
@@ -115,15 +82,45 @@ interface GitHubWebhookEvent<TType extends string, TPayload> {
 }
 ```
 
+Unsupported verified event/action combinations use:
+
+```ts
+interface GitHubUnknownEvent {
+  type: 'unknown';
+  event: string;
+  action?: string;
+  deliveryId: string;
+  hookId?: string;
+  installationTarget?: { id: string; type: string };
+  installationId?: number;
+  raw: unknown;
+}
+```
+
+GitHub `ping` is acknowledged internally and does not invoke `webhook`.
+Signatures are checked against exact request bytes before form or JSON parsing.
+The package does not deduplicate `deliveryId`.
+
+## Identity
+
+```ts
+interface GitHubIssueRef {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+}
+
+interface GitHubRepositoryRef {
+  id: number;
+  owner: string;
+  name: string;
+}
+```
+
 ## Errors
 
-| Error                               | Structured fields                                     |
-| ----------------------------------- | ----------------------------------------------------- |
-| `DuplicateGitHubHandlerError`       | `event`                                               |
-| `InvalidGitHubConversationKeyError` | —                                                     |
-| `InvalidGitHubInputError`           | `field`                                               |
-| `GitHubApiError`                    | `status`, `requestId`, `responseMessage`, `rateLimit` |
-| `GitHubRateLimitError`              | Same as `GitHubApiError`                              |
-| `GitHubTimeoutError`                | `timeoutMs`                                           |
+- `InvalidGitHubConversationKeyError`
+- `InvalidGitHubInputError`, with structured `field`
 
-See [GitHub setup](/docs/guide/channels/github/) for an end-to-end example.
+See [GitHub setup](/docs/guide/channels/github/) for composition with Octokit
+and application-owned tools.

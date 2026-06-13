@@ -1,36 +1,32 @@
+import type { Context, Env, Handler } from 'hono';
 import type {
-	GitHubEventName,
+	GitHubEvent,
 	GitHubEvents,
-	GitHubNotificationHandler,
-	GitHubRouteHandler,
 	GitHubWebhookEvent,
+	GitHubWebhookHandlerResult,
+	JsonValue,
 } from './index.ts';
 
 const DEFAULT_BODY_LIMIT = 25 * 1024 * 1024;
 const encoder = new TextEncoder();
 
-interface GitHubWebhookHandlerOptions {
+interface GitHubWebhookHandlerOptions<E extends Env> {
 	webhookSecret: string;
 	bodyLimit?: number;
-	getHandler(
-		type: GitHubEventName,
-	): GitHubNotificationHandler<GitHubEvents[GitHubEventName]> | undefined;
+	webhook(input: { c: Context<E>; event: GitHubEvent }): GitHubWebhookHandlerResult;
 }
 
-export function createGitHubWebhookHandler(options: GitHubWebhookHandlerOptions): GitHubRouteHandler {
+export function createGitHubWebhookHandler<E extends Env>(
+	options: GitHubWebhookHandlerOptions<E>,
+): Handler<E> {
 	const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
 	if (!Number.isSafeInteger(bodyLimit) || bodyLimit <= 0) {
 		throw new TypeError('GitHub webhook bodyLimit must be a positive integer.');
 	}
 	const secret = encoder.encode(options.webhookSecret);
 
-	return async (request) => {
-		const pathname = new URL(request.url).pathname;
-		if (pathname !== '/') return new Response(null, { status: 404 });
-		if (request.method !== 'POST') {
-			return new Response(null, { status: 405, headers: { Allow: 'POST' } });
-		}
-
+	return async (c) => {
+		const request = c.req.raw;
 		const contentLength = request.headers.get('content-length');
 		if (contentLength !== null) {
 			if (!/^\d+$/.test(contentLength)) return new Response(null, { status: 400 });
@@ -61,27 +57,48 @@ export function createGitHubWebhookHandler(options: GitHubWebhookHandlerOptions)
 		const eventName = request.headers.get('x-github-event');
 		const deliveryId = request.headers.get('x-github-delivery');
 		if (!eventName || !deliveryId) return new Response(null, { status: 400 });
-		if (eventName === 'ping') return new Response(null, { status: 204 });
+		if (eventName === 'ping') return new Response(null, { status: 200 });
 
 		if (isSupportedBaseEvent(eventName) && typeof raw.action !== 'string') {
 			return new Response(null, { status: 400 });
 		}
 		const action = readString(raw, 'action');
 		const type = action ? `${eventName}.${action}` : undefined;
-		if (!isGitHubEventName(type)) return new Response(null, { status: 204 });
-
-		const event = normalizeEvent(type, raw, request.headers, deliveryId);
+		const event = isGitHubEventName(type)
+			? normalizeEvent(type, raw, request.headers, deliveryId)
+			: normalizeUnknownEvent(eventName, action, raw, request.headers, deliveryId);
 		if (!event) return new Response(null, { status: 400 });
-		const handler = options.getHandler(type);
-		if (!handler) return new Response(null, { status: 204 });
 
 		try {
-			await handler(event);
-			return new Response(null, { status: 204 });
+			const result = await options.webhook({ c, event });
+			return serializeHandlerResult(c, result);
 		} catch {
 			return new Response(null, { status: 500 });
 		}
 	};
+}
+
+function serializeHandlerResult<E extends Env>(_c: Context<E>, value: unknown): Response {
+	if (value instanceof Response) return value;
+	if (value === undefined) return new Response(null, { status: 200 });
+	if (!isJsonValue(value)) return new Response(null, { status: 500 });
+	return Response.json(value);
+}
+
+function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
+	if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
+	if (typeof value === 'number') return Number.isFinite(value);
+	if (typeof value !== 'object') return false;
+	if (seen.has(value)) return false;
+	if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) return false;
+	seen.add(value);
+	try {
+		return Array.isArray(value)
+			? value.every((item) => isJsonValue(item, seen))
+			: Object.values(value).every((item) => isJsonValue(item, seen));
+	} finally {
+		seen.delete(value);
+	}
 }
 
 async function readBody(request: Request, bodyLimit: number): Promise<Uint8Array | undefined> {
@@ -156,7 +173,7 @@ function parsePayload(body: Uint8Array, mediaType: string): unknown {
 	}
 }
 
-function isGitHubEventName(value: string | undefined): value is GitHubEventName {
+function isGitHubEventName(value: string | undefined): value is keyof GitHubEvents {
 	return (
 		value === 'issues.opened' ||
 		value === 'issue_comment.created' ||
@@ -168,12 +185,31 @@ function isSupportedBaseEvent(value: string): boolean {
 	return value === 'issues' || value === 'issue_comment' || value === 'pull_request';
 }
 
-function normalizeEvent(
-	type: GitHubEventName,
+function normalizeUnknownEvent(
+	event: string,
+	action: string | undefined,
 	raw: Record<string, unknown>,
 	headers: Headers,
 	deliveryId: string,
-): GitHubEvents[GitHubEventName] | undefined {
+): GitHubEvent {
+	return {
+		type: 'unknown',
+		event,
+		...(action === undefined ? {} : { action }),
+		deliveryId,
+		hookId: readOptionalHeader(headers, 'x-github-hook-id'),
+		installationTarget: readInstallationTarget(headers),
+		installationId: readInstallationId(raw) ?? undefined,
+		raw,
+	};
+}
+
+function normalizeEvent(
+	type: keyof GitHubEvents,
+	raw: Record<string, unknown>,
+	headers: Headers,
+	deliveryId: string,
+): GitHubEvents[keyof GitHubEvents] | undefined {
 	const repository = readRecord(raw, 'repository');
 	const owner = repository && readRecord(repository, 'owner');
 	const repositoryId = repository && readPositiveInteger(repository, 'id');
@@ -241,9 +277,7 @@ function normalizeEvent(
 	>;
 }
 
-function readInstallationTarget(
-	headers: Headers,
-): { id: string; type: string } | undefined {
+function readInstallationTarget(headers: Headers): { id: string; type: string } | undefined {
 	const id = readOptionalHeader(headers, 'x-github-hook-installation-target-id');
 	const type = readOptionalHeader(headers, 'x-github-hook-installation-target-type');
 	return id && type ? { id, type } : undefined;

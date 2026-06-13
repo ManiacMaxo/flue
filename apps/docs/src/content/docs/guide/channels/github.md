@@ -1,117 +1,125 @@
 ---
 title: GitHub
-description: Configure signed GitHub webhooks and issue or pull-request tools.
+description: Receive signed GitHub webhooks and use Octokit from application-owned tools.
 ---
 
-`@flue/github` accepts selected repository webhook events and provides
-fixed-origin comment and label writes.
+## Add GitHub
 
-## Install and configure
+Run the GitHub recipe through your coding agent:
 
 ```sh
-pnpm add @flue/github
+flue add github --print | codex
 ```
 
-Create a repository or organization webhook that points to your deployed route,
-for example:
+It installs `@flue/github` for verified ingress and the official
+`@octokit/rest` SDK for outbound API calls. It creates
+`src/channels/github.ts` with named `channel` and `client` exports.
+
+Configure the GitHub webhook URL as:
 
 ```txt
-https://example.com/webhooks/github
+https://example.com/channels/github/webhook
 ```
 
-Set a webhook secret and select `application/json` or
-`application/x-www-form-urlencoded`. Subscribe to the events your application
-handles:
+If `flue()` is mounted beneath an outer prefix, include that prefix. Configure
+`application/json` or `application/x-www-form-urlencoded`, set a webhook
+secret, and subscribe to the events the application handles.
 
-- Issues
-- Issue comments
-- Pull requests
+`GITHUB_WEBHOOK_SECRET` verifies inbound deliveries.
+`GITHUB_TOKEN` authenticates outbound Octokit calls. Keep them in the
+project's existing secret system.
 
-Create a token authorized for the repositories and API writes your application
-uses. See GitHub's documentation for
-[creating webhooks](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks)
-and [repository permissions](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
-
-Provide the credentials to the application:
-
-```sh
-GITHUB_WEBHOOK_SECRET=...
-GITHUB_TOKEN=...
-```
-
-## Create the channel
+## Channel module
 
 ```ts title="src/channels/github.ts"
 import { createGitHubChannel } from '@flue/github';
-import { dispatch } from '@flue/runtime';
+import { defineTool, dispatch } from '@flue/runtime';
+import { Octokit } from '@octokit/rest';
 import assistant from '../agents/assistant.ts';
 
-export const github = createGitHubChannel({
-  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
-  token: process.env.GITHUB_TOKEN!,
+export const client = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
 });
 
-github.on('issues.opened', async (event) => {
-  const issue = {
-    owner: event.repository.owner,
-    repo: event.repository.name,
-    issueNumber: event.payload.issue.number,
-  };
+export const channel = createGitHubChannel({
+  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
 
-  await dispatch(assistant, {
-    id: github.conversationKey(issue),
-    input: {
-      type: 'github.issues.opened',
-      deliveryId: event.deliveryId,
-      title: event.payload.issue.title,
-      body: event.payload.issue.body,
+  // Path: /channels/github/webhook
+  async webhook({ event }) {
+    switch (event.type) {
+      case 'issues.opened':
+      case 'pull_request.opened': {
+        const issue = {
+          owner: event.repository.owner,
+          repo: event.repository.name,
+          issueNumber:
+            event.type === 'issues.opened'
+              ? event.payload.issue.number
+              : event.payload.pullRequest.number,
+        };
+        await dispatch(assistant, {
+          id: channel.conversationKey(issue),
+          input: {
+            type: `github.${event.type}`,
+            deliveryId: event.deliveryId,
+            installationId: event.installationId,
+            issue,
+          },
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  },
+});
+
+export function commentOnIssue(ref: { owner: string; repo: string; issueNumber: number }) {
+  return defineTool({
+    name: 'comment_on_github_issue',
+    description: 'Comment on the GitHub issue or pull request bound to this agent.',
+    parameters: {
+      type: 'object',
+      properties: { body: { type: 'string', minLength: 1 } },
+      required: ['body'],
+      additionalProperties: false,
+    },
+    async execute({ body }) {
+      const result = await client.rest.issues.createComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.issueNumber,
+        body,
+      });
+      return JSON.stringify({ commentId: result.data.id });
     },
   });
-});
+}
 ```
 
-Supported handler keys are `issues.opened`, `issue_comment.created`, and
-`pull_request.opened`. Verified `ping` deliveries and unknown event/action
-combinations are acknowledged without invoking a handler.
+The package forwards verified `issues.opened`, `issue_comment.created`, and
+`pull_request.opened` variants. Verified unsupported deliveries arrive as
+`type: 'unknown'`. GitHub `ping` is handled internally.
 
-## Mount the webhook
-
-```ts title="src/app.ts"
-import { flue } from '@flue/runtime/routing';
-import { Hono } from 'hono';
-import { github } from './channels/github.ts';
-
-const app = new Hono();
-app.mount('/webhooks/github', github.routes.webhook());
-app.route('/', flue());
-
-export default app;
-```
-
-The route verifies the signature against the exact original bytes. Mount it
-before middleware that consumes or rewrites the body.
-
-## Add issue tools
+## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
 import { createAgent } from '@flue/runtime';
-import { github } from '../channels/github.ts';
+import { channel, commentOnIssue } from '../channels/github.ts';
 
-export default createAgent(({ id }) => {
-  const issue = github.parseConversationKey(id);
-
-  return {
-    tools: [github.tools.commentOnIssue(issue), github.tools.addLabels(issue)],
-  };
-});
+export default createAgent(({ id }) => ({
+  model: 'anthropic/claude-haiku-4-5',
+  tools: [commentOnIssue(channel.parseConversationKey(id))],
+}));
 ```
 
-Pull requests use their issue number because GitHub's issue comment and label
-APIs also address pull requests through the issues surface.
+Pull requests use their issue number for issue comments. The model selects the
+comment body; trusted code binds the repository and issue. The channel-agent
+import cycle is supported because both imported bindings are read only inside
+deferred callbacks or initializers.
 
-GitHub expects a prompt webhook response and does not automatically retry every
-failed delivery. Use `deliveryId` for application-owned idempotency and GitHub's
-manual redelivery tools when required.
+GitHub does not automatically retry every failed webhook delivery. Preserve
+`deliveryId` when useful for idempotency and use GitHub's delivery inspection
+and manual redelivery tools when required.
 
-See the [`@flue/github` reference](/docs/api/github-channel/) for route options,
-event envelopes, clients, tools, and errors.
+See the [`@flue/github` API reference](/docs/api/github-channel/).

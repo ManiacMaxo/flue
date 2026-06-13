@@ -1,12 +1,13 @@
+import type { Context, Env, Handler } from 'hono';
 import type {
+	JsonValue,
 	SlackActionEnvelope,
-	SlackActionResponse,
-	SlackEventName,
+	SlackEvent,
 	SlackEvents,
-	SlackInteractionHandler,
-	SlackNotificationHandler,
-	SlackRouteHandler,
-	SlackViewResponse,
+	SlackHandlerResult,
+	SlackInteraction,
+	SlackUnknownEvent,
+	SlackUnknownInteraction,
 	SlackViewSubmissionEnvelope,
 } from './index.ts';
 
@@ -23,25 +24,21 @@ interface SharedRouteOptions {
 	handlerTimeoutMs?: number;
 }
 
-interface SlackEventsHandlerOptions extends SharedRouteOptions {
-	getHandler(
-		type: SlackEventName,
-	): SlackNotificationHandler<SlackEvents[SlackEventName]> | undefined;
+interface SlackEventsHandlerOptions<E extends Env> extends SharedRouteOptions {
+	events(input: { c: Context<E>; event: SlackEvent }): SlackHandlerResult;
 }
 
-interface SlackInteractionsHandlerOptions extends SharedRouteOptions {
-	getActionHandler(
-		actionId: string,
-	): SlackInteractionHandler<SlackActionEnvelope, SlackActionResponse> | undefined;
-	getViewHandler(
-		callbackId: string,
-	): SlackInteractionHandler<SlackViewSubmissionEnvelope, SlackViewResponse> | undefined;
+interface SlackInteractionsHandlerOptions<E extends Env> extends SharedRouteOptions {
+	interactions(input: { c: Context<E>; interaction: SlackInteraction }): SlackHandlerResult;
 }
 
-export function createSlackEventsHandler(options: SlackEventsHandlerOptions): SlackRouteHandler {
+export function createSlackEventsHandler<E extends Env>(
+	options: SlackEventsHandlerOptions<E>,
+): Handler<E> {
 	const route = prepareRoute(options);
 
-	return async (request) => {
+	return async (c) => {
+		const request = c.req.raw;
 		const verified = await route.verify(request, 'application/json');
 		if (verified instanceof Response) return verified;
 		const raw = parseJson(verified.body);
@@ -50,11 +47,33 @@ export function createSlackEventsHandler(options: SlackEventsHandlerOptions): Sl
 		const envelopeType = readString(raw, 'type');
 		if (envelopeType === 'url_verification') {
 			const challenge = readString(raw, 'challenge');
-			return challenge === undefined
-				? response(400)
-				: Response.json({ challenge }, { status: 200 });
+			const appId = readString(raw, 'api_app_id');
+			const teamId = readString(raw, 'team_id');
+			if (challenge === undefined || !appId || !teamId) return response(400);
+			if (appId !== options.appId || teamId !== options.teamId) return response(403);
+			return Response.json({ challenge }, { status: 200 });
 		}
-		if (envelopeType !== 'event_callback') return response(200);
+		if (envelopeType !== 'event_callback') {
+			const appId = readString(raw, 'api_app_id');
+			const teamId = readString(raw, 'team_id');
+			if (!appId || !teamId) return response(400);
+			if (appId !== options.appId || teamId !== options.teamId) return response(403);
+			const eventId = readOptionalString(raw, 'event_id');
+			return invokeEvent(
+				options.events,
+				c,
+				{
+					type: 'unknown',
+					eventType: envelopeType ?? 'unknown',
+					...(eventId === undefined ? {} : { eventId }),
+					appId,
+					teamId,
+					retry: readRetry(request.headers),
+					raw,
+				},
+				route.handlerTimeoutMs,
+			);
+		}
 
 		const appId = readString(raw, 'api_app_id');
 		const teamId = readString(raw, 'team_id');
@@ -70,23 +89,31 @@ export function createSlackEventsHandler(options: SlackEventsHandlerOptions): Sl
 		) {
 			return response(200);
 		}
-		if (eventType !== 'app_mention' && eventType !== 'message') return response(200);
 
-		const normalized = normalizeEvent(eventType, raw, event, request.headers);
+		const normalized =
+			eventType === 'app_mention' || eventType === 'message'
+				? normalizeEvent(eventType, raw, event, request.headers)
+				: ({
+						type: 'unknown',
+						eventType: eventType ?? 'unknown',
+						eventId,
+						appId,
+						teamId,
+						retry: readRetry(request.headers),
+						raw,
+					} satisfies SlackUnknownEvent);
 		if (!normalized) return response(400);
-		const handler = options.getHandler(eventType);
-		if (!handler) return response(200);
-		const outcome = await runHandler(() => handler(normalized), route.handlerTimeoutMs);
-		return response(outcome.type === 'success' ? 200 : 500);
+		return invokeEvent(options.events, c, normalized, route.handlerTimeoutMs);
 	};
 }
 
-export function createSlackInteractionsHandler(
-	options: SlackInteractionsHandlerOptions,
-): SlackRouteHandler {
+export function createSlackInteractionsHandler<E extends Env>(
+	options: SlackInteractionsHandlerOptions<E>,
+): Handler<E> {
 	const route = prepareRoute(options);
 
-	return async (request) => {
+	return async (c) => {
+		const request = c.req.raw;
 		const verified = await route.verify(request, 'application/x-www-form-urlencoded');
 		if (verified instanceof Response) return verified;
 		const raw = parseFormPayload(verified.body);
@@ -101,40 +128,51 @@ export function createSlackInteractionsHandler(
 		if (appId !== options.appId || teamId !== options.teamId) return response(403);
 
 		const type = readString(raw, 'type');
+		let interaction: SlackInteraction | undefined;
 		if (type === 'block_actions') {
-			const envelope = normalizeAction(raw, appId, teamId, userId);
-			if (!envelope) return response(400);
-			const handler = options.getActionHandler(envelope.actionId);
-			if (!handler) return response(404);
-			const outcome = await runHandler(() => handler(envelope), route.handlerTimeoutMs);
-			if (outcome.type !== 'success' || !isActionResponse(outcome.value)) return response(500);
-			return response(200);
+			interaction = normalizeAction(raw, appId, teamId, userId);
+		} else if (type === 'view_submission') {
+			interaction = normalizeView(raw, appId, teamId, userId);
+		} else {
+			interaction = {
+				type: 'unknown',
+				interactionType: type ?? 'unknown',
+				appId,
+				teamId,
+				userId,
+				raw,
+			} satisfies SlackUnknownInteraction;
 		}
-
-		if (type === 'view_submission') {
-			const envelope = normalizeView(raw, appId, teamId, userId);
-			if (!envelope) return response(400);
-			const handler = options.getViewHandler(envelope.callbackId);
-			if (!handler) return response(404);
-			const outcome = await runHandler(() => handler(envelope), route.handlerTimeoutMs);
-			if (outcome.type !== 'success' || !isViewResponse(outcome.value)) return response(500);
-			if (outcome.value.type === 'ack') return response(200);
-			return Response.json(
-				{ response_action: 'errors', errors: outcome.value.errors },
-				{ status: 200 },
-			);
-		}
-
-		return response(404);
+		if (!interaction) return response(400);
+		return invokeInteraction(options.interactions, c, interaction, route.handlerTimeoutMs);
 	};
+}
+
+async function invokeEvent<E extends Env>(
+	handler: (input: { c: Context<E>; event: SlackEvent }) => SlackHandlerResult,
+	c: Context<E>,
+	event: SlackEvent,
+	timeoutMs: number,
+): Promise<Response> {
+	const outcome = await runHandler(() => handler({ c, event }), timeoutMs);
+	if (outcome.type !== 'success') return response(500);
+	return serializeHandlerResult(outcome.value);
+}
+
+async function invokeInteraction<E extends Env>(
+	handler: (input: { c: Context<E>; interaction: SlackInteraction }) => SlackHandlerResult,
+	c: Context<E>,
+	interaction: SlackInteraction,
+	timeoutMs: number,
+): Promise<Response> {
+	const outcome = await runHandler(() => handler({ c, interaction }), timeoutMs);
+	if (outcome.type !== 'success') return response(500);
+	return serializeHandlerResult(outcome.value);
 }
 
 function prepareRoute(options: SharedRouteOptions): {
 	handlerTimeoutMs: number;
-	verify(
-		request: Request,
-		expectedMediaType: string,
-	): Promise<{ body: Uint8Array } | Response>;
+	verify(request: Request, expectedMediaType: string): Promise<{ body: Uint8Array } | Response>;
 } {
 	const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
 	const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
@@ -152,16 +190,7 @@ function prepareRoute(options: SharedRouteOptions): {
 	return {
 		handlerTimeoutMs,
 		async verify(request, expectedMediaType) {
-			const pathname = new URL(request.url).pathname;
-			if (pathname !== '/') return response(404);
-			if (request.method !== 'POST') {
-				return new Response(null, { status: 405, headers: { Allow: 'POST' } });
-			}
-			const mediaType = request.headers
-				.get('content-type')
-				?.split(';', 1)[0]
-				?.trim()
-				.toLowerCase();
+			const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
 			if (mediaType !== expectedMediaType) return response(415);
 
 			const contentLength = request.headers.get('content-length');
@@ -196,11 +225,11 @@ function prepareRoute(options: SharedRouteOptions): {
 }
 
 function normalizeEvent(
-	type: SlackEventName,
+	type: keyof SlackEvents,
 	raw: Record<string, unknown>,
 	event: Record<string, unknown>,
 	headers: Headers,
-): SlackEvents[SlackEventName] | undefined {
+): SlackEvents[keyof SlackEvents] | undefined {
 	const appId = readString(raw, 'api_app_id');
 	const teamId = readString(raw, 'team_id');
 	const eventId = readString(raw, 'event_id');
@@ -220,13 +249,6 @@ function normalizeEvent(
 		retry: readRetry(headers),
 		raw,
 	};
-	if (type === 'app_mention') {
-		return {
-			...common,
-			type,
-			payload: { channelId, messageTs, threadTs, text, userId },
-		};
-	}
 	return {
 		...common,
 		type,
@@ -250,29 +272,13 @@ function normalizeAction(
 	const message = readRecord(raw, 'message');
 	const container = readRecord(raw, 'container');
 	if (!container || readString(container, 'type') !== 'message') return undefined;
-	const channelIdFromChannel = channel && readOptionalString(channel, 'id');
-	const channelIdFromContainer = readOptionalString(container, 'channel_id');
-	if (
-		channelIdFromChannel &&
-		channelIdFromContainer &&
-		channelIdFromChannel !== channelIdFromContainer
-	) {
-		return undefined;
-	}
-	const messageTsFromMessage = message && readOptionalString(message, 'ts');
-	const messageTsFromContainer = readOptionalString(container, 'message_ts');
-	if (
-		messageTsFromMessage &&
-		messageTsFromContainer &&
-		messageTsFromMessage !== messageTsFromContainer
-	) {
-		return undefined;
-	}
-	const channelId = channelIdFromChannel ?? channelIdFromContainer;
-	const messageTs = messageTsFromMessage ?? messageTsFromContainer;
+	const channelId =
+		(channel && readOptionalString(channel, 'id')) ?? readOptionalString(container, 'channel_id');
+	const messageTs =
+		(message && readOptionalString(message, 'ts')) ?? readOptionalString(container, 'message_ts');
 	const threadTs =
 		(message && readOptionalString(message, 'thread_ts')) ??
-		(container && readOptionalString(container, 'thread_ts')) ??
+		readOptionalString(container, 'thread_ts') ??
 		messageTs;
 	if (!channelId || !messageTs || !threadTs) return undefined;
 	return {
@@ -314,10 +320,7 @@ function normalizeView(
 	};
 }
 
-type HandlerOutcome<T> =
-	| { type: 'success'; value: T }
-	| { type: 'failure' }
-	| { type: 'timeout' };
+type HandlerOutcome<T> = { type: 'success'; value: T } | { type: 'failure' } | { type: 'timeout' };
 
 async function runHandler<T>(
 	handler: () => T | Promise<T>,
@@ -338,22 +341,27 @@ async function runHandler<T>(
 	return outcome;
 }
 
-function isActionResponse(value: unknown): value is SlackActionResponse {
-	return isRecord(value) && value.type === 'ack' && Object.keys(value).length === 1;
+function serializeHandlerResult(value: unknown): Response {
+	if (value instanceof Response) return value;
+	if (value === undefined) return response(200);
+	if (!isJsonValue(value)) return response(500);
+	return Response.json(value);
 }
 
-function isViewResponse(value: unknown): value is SlackViewResponse {
-	if (!isRecord(value)) return false;
-	if (value.type === 'ack') return Object.keys(value).length === 1;
-	if (value.type !== 'validation_errors' || !isRecord(value.errors)) return false;
-	const entries = Object.entries(value.errors);
-	return (
-		entries.length > 0 &&
-		entries.every(
-			([blockId, message]) =>
-				blockId.length > 0 && typeof message === 'string' && message.length > 0,
-		)
-	);
+function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
+	if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
+	if (typeof value === 'number') return Number.isFinite(value);
+	if (typeof value !== 'object') return false;
+	if (seen.has(value)) return false;
+	if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) return false;
+	seen.add(value);
+	try {
+		return Array.isArray(value)
+			? value.every((item) => isJsonValue(item, seen))
+			: Object.values(value).every((item) => isJsonValue(item, seen));
+	} finally {
+		seen.delete(value);
+	}
 }
 
 function readRetry(headers: Headers): { number: number; reason?: string } | undefined {
@@ -422,12 +430,7 @@ async function verifySignature(
 		false,
 		['verify'],
 	);
-	return crypto.subtle.verify(
-		'HMAC',
-		key,
-		toArrayBuffer(signature),
-		toArrayBuffer(signed),
-	);
+	return crypto.subtle.verify('HMAC', key, toArrayBuffer(signature), toArrayBuffer(signed));
 }
 
 function parseJson(body: Uint8Array): unknown {

@@ -6,7 +6,12 @@ import { ModelNotConfiguredError } from '../src/errors.ts';
 import { InMemoryRunStore } from '../src/node/run-store.ts';
 import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
 import { agentStreamPath } from '../src/runtime/event-stream-store.ts';
-import { configureFlueRuntime, createDefaultFlueApp, flue, resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
+import {
+	configureFlueRuntime,
+	createDefaultFlueApp,
+	flue,
+	resetFlueRuntimeForTests,
+} from '../src/runtime/flue-app.ts';
 import { InMemorySessionStore } from '../src/session.ts';
 import { createTestEventStreamStore } from './helpers/test-event-stream-store.ts';
 
@@ -15,6 +20,103 @@ afterEach(() => {
 });
 
 describe('flue()', () => {
+	it('serves a discovered channel handler beneath the flue mount prefix', async () => {
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				slack: {
+					'POST /events': async (c) =>
+						c.json({
+							path: c.req.path,
+							team: c.req.query('team'),
+						}),
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/api', flue());
+
+		const response = await app.fetch(
+			new Request('http://localhost/api/channels/slack/events?team=T123', {
+				method: 'POST',
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			path: '/api/channels/slack/events',
+			team: 'T123',
+		});
+	});
+
+	it('returns method_not_allowed for a configured channel path with the wrong method', async () => {
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				slack: {
+					'POST /events': async (c) => c.body(null, 200),
+					'PUT /events': async (c) => c.body(null, 202),
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/', flue());
+
+		const response = await app.fetch(
+			new Request('http://localhost/channels/slack/events', { method: 'GET' }),
+		);
+
+		expect(response.status).toBe(405);
+		expect(response.headers.get('allow')).toBe('POST, PUT');
+	});
+
+	it('serves channel route suffixes with multiple path segments', async () => {
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				custom: {
+					'POST /webhooks/retries': async (c) => c.text(c.req.param('suffix') ?? ''),
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/', flue());
+
+		const response = await app.fetch(
+			new Request('http://localhost/channels/custom/webhooks/retries', { method: 'POST' }),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.text()).toBe('webhooks/retries');
+	});
+
+	it('does not serve the top-level channel namespace or an unknown suffix', async () => {
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				slack: {
+					'POST /events': async (c) => c.body(null, 200),
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/', flue());
+
+		const rootResponse = await app.fetch(
+			new Request('http://localhost/channels/slack', { method: 'POST' }),
+		);
+		const unknownResponse = await app.fetch(
+			new Request('http://localhost/channels/slack/unknown', { method: 'POST' }),
+		);
+
+		expect(rootResponse.status).toBe(404);
+		expect(unknownResponse.status).toBe(404);
+	});
+
 	it('describes public agent workflow and workflow-run routes when the mounted app serves openapi.json', async () => {
 		configureFlueRuntime({
 			target: 'node',
@@ -44,14 +146,18 @@ describe('flue()', () => {
 		expect(Object.keys(body.paths['/agents/{name}/{id}'] ?? {})).toEqual(['post']);
 		// Both invocation routes document the same modes: 202 admission by
 		// default plus the ?wait=result synchronous mode.
-		for (const post of [body.paths['/workflows/{name}']?.post, body.paths['/agents/{name}/{id}']?.post]) {
+		for (const post of [
+			body.paths['/workflows/{name}']?.post,
+			body.paths['/agents/{name}/{id}']?.post,
+		]) {
 			expect(post['x-flue-invocation-modes']).toEqual(['accepted', 'wait-result']);
 			expect(Object.keys(post.responses)).toEqual(expect.arrayContaining(['200', '202']));
 			expect(post.parameters).toEqual(
 				expect.arrayContaining([expect.objectContaining({ name: 'wait', in: 'query' })]),
 			);
 		}
-		const schema = body.paths['/agents/{name}/{id}']?.post?.requestBody?.content?.['application/json']?.schema;
+		const schema =
+			body.paths['/agents/{name}/{id}']?.post?.requestBody?.content?.['application/json']?.schema;
 		expect(schema).toMatchObject({
 			type: 'object',
 			required: ['message'],
@@ -80,7 +186,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (id) => async (payload) => ({ submissionId: 'submission-1', result: { instanceId: id, payload } }),
+				assistant: (id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { instanceId: id, payload },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -103,7 +212,9 @@ describe('flue()', () => {
 			submissionId: 'submission-1',
 		});
 		// 202 admissions mirror the DS stream-creation convention.
-		expect(response.headers.get('location')).toBe('http://localhost/api/agents/assistant/customer-123');
+		expect(response.headers.get('location')).toBe(
+			'http://localhost/api/agents/assistant/customer-123',
+		);
 		expect(response.headers.get('stream-next-offset')).toBe('-1');
 	});
 
@@ -111,23 +222,32 @@ describe('flue()', () => {
 		configureFlueRuntime({
 			target: 'node',
 			manifest: { agents: [{ name: 'assistant', transports: { http: true }, created: true }] },
-			createAdmission: { assistant: () => async (payload) => ({ submissionId: 'submission-1', result: payload }) },
+			createAdmission: {
+				assistant: () => async (payload) => ({ submissionId: 'submission-1', result: payload }),
+			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
 		});
 		const app = new Hono();
 		app.route('/api', flue());
-		const response = await app.fetch(new Request('http://localhost/api/agents/assistant/customer-123?wait=result', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				message: 'hello',
-				images: [{ type: 'image', data: 'YWJj', mimeType: 'image/png', ignored: true }],
-				ignored: true,
+		const response = await app.fetch(
+			new Request('http://localhost/api/agents/assistant/customer-123?wait=result', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					message: 'hello',
+					images: [{ type: 'image', data: 'YWJj', mimeType: 'image/png', ignored: true }],
+					ignored: true,
+				}),
 			}),
-		}));
+		);
 		expect(response.status).toBe(200);
-		expect((await response.json()) as unknown).toMatchObject({ result: { message: 'hello', images: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }] } });
+		expect((await response.json()) as unknown).toMatchObject({
+			result: {
+				message: 'hello',
+				images: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+			},
+		});
 	});
 
 	it('returns the synchronous result envelope when an agent POST requests wait=result', async () => {
@@ -137,7 +257,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (id) => async (payload) => ({ submissionId: 'submission-1', result: { instanceId: id, payload } }),
+				assistant: (id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { instanceId: id, payload },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -212,7 +335,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (id) => async (payload) => ({ submissionId: 'submission-1', result: { instanceId: id, payload } }),
+				assistant: (id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { instanceId: id, payload },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -259,7 +385,7 @@ describe('flue()', () => {
 		);
 	});
 
-	it('captures the prompt tail offset and serves exactly that prompt\'s events from it', async () => {
+	it("captures the prompt tail offset and serves exactly that prompt's events from it", async () => {
 		const store = createTestEventStreamStore();
 		configureFlueRuntime({
 			target: 'node',
@@ -319,7 +445,7 @@ describe('flue()', () => {
 		expect(await offsetRead.json()).toEqual([{ type: 'message', text: 'again' }]);
 	});
 
-	it('keeps the agent stream unreadable when the instance\'s only prompt fails admission', async () => {
+	it("keeps the agent stream unreadable when the instance's only prompt fails admission", async () => {
 		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		configureFlueRuntime({
 			target: 'node',
@@ -354,7 +480,9 @@ describe('flue()', () => {
 				new Request('http://localhost/api/agents/assistant/customer-123'),
 			);
 			expect(read.status).toBe(404);
-			expect(((await read.json()) as { error: { type: string } }).error.type).toBe('stream_not_found');
+			expect(((await read.json()) as { error: { type: string } }).error.type).toBe(
+				'stream_not_found',
+			);
 		} finally {
 			consoleError.mockRestore();
 		}
@@ -470,7 +598,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (_id) => async (payload) => ({ submissionId: 'submission-1', result: { payload } }),
+				assistant: (_id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { payload },
+				}),
 			},
 			agentRouteMiddleware: {
 				assistant: async (c, next) => {
@@ -619,16 +750,17 @@ describe('flue()', () => {
 		});
 		configureFlueRuntime({
 			target: 'node',
-			manifest: { agents: [], workflows: [{ name: 'daily-report-v2', transports: { http: true } }] },
+			manifest: {
+				agents: [],
+				workflows: [{ name: 'daily-report-v2', transports: { http: true } }],
+			},
 			runStore,
 			eventStreamStore: createTestEventStreamStore(),
 		});
 		const app = new Hono();
 		app.route('/api', flue());
 
-		const streamRead = await app.fetch(
-			new Request('http://localhost/api/runs/run_01DAILYREPORT'),
-		);
+		const streamRead = await app.fetch(new Request('http://localhost/api/runs/run_01DAILYREPORT'));
 		expect(streamRead.status).toBe(404);
 		expect(((await streamRead.json()) as { error: { type: string } }).error.type).toBe(
 			'run_not_found',
@@ -718,7 +850,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (_id) => async (payload) => ({ submissionId: 'submission-1', result: { message: payload.message } }),
+				assistant: (_id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { message: payload.message },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -752,7 +887,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (_id) => async (payload) => ({ submissionId: 'submission-1', result: { message: payload.message } }),
+				assistant: (_id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { message: payload.message },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -817,7 +955,10 @@ describe('flue()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (_id) => async (payload) => ({ submissionId: 'submission-1', result: { message: payload.message } }),
+				assistant: (_id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { message: payload.message },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),
@@ -865,11 +1006,13 @@ describe('flue()', () => {
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
 					message: 'hello',
-					images: [{
-						type: 'image',
-						data: 'a'.repeat(MAX_IMAGE_DATA_LENGTH + 1),
-						mimeType: 'image/png',
-					}],
+					images: [
+						{
+							type: 'image',
+							data: 'a'.repeat(MAX_IMAGE_DATA_LENGTH + 1),
+							mimeType: 'image/png',
+						},
+					],
 				}),
 			}),
 		);
@@ -919,7 +1062,10 @@ describe('createDefaultFlueApp()', () => {
 				agents: [{ name: 'assistant', transports: { http: true }, created: true }],
 			},
 			createAdmission: {
-				assistant: (id) => async (payload) => ({ submissionId: 'submission-1', result: { instanceId: id, payload } }),
+				assistant: (id) => async (payload) => ({
+					submissionId: 'submission-1',
+					result: { instanceId: id, payload },
+				}),
 			},
 			createContext: createTestContext,
 			eventStreamStore: createTestEventStreamStore(),

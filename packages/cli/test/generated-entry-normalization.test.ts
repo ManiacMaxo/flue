@@ -4,11 +4,13 @@ import { generateBuiltModuleNormalizationSource } from '../src/lib/generated-ent
 type NormalizeBuiltModules = (
 	agentModules: Record<string, Record<string, unknown>>,
 	workflowModules: Record<string, Record<string, unknown>>,
+	channelModules?: Record<string, Record<string, unknown>>,
 ) => {
 	manifest: {
 		agents: Array<Record<string, unknown>>;
 		workflows: Array<Record<string, unknown>>;
 	};
+	channelHandlers: Record<string, Record<string, (value: unknown) => unknown>>;
 };
 
 // The normalization function ships as generated source inside built server
@@ -54,5 +56,99 @@ describe('normalizeBuiltModules()', () => {
 		expect(() =>
 			normalizeBuiltModules({ support: agentModule({ description: '   ' }) }, {}),
 		).toThrow('[flue] Agent "support" description export must be a non-empty string.');
+	});
+
+	it('normalizes discovered channel routes into a method and path lookup', () => {
+		const handler = () => new Response('ok');
+
+		const { channelHandlers } = normalizeBuiltModules(
+			{ support: agentModule() },
+			{},
+			{
+				slack: {
+					channel: {
+						routes: [
+							{ method: 'POST', path: '/events', handler },
+							{ method: 'POST', path: '/interactions/retries', handler },
+						],
+					},
+				},
+			},
+		);
+
+		expect(channelHandlers).toEqual({
+			slack: {
+				'POST /events': handler,
+				'POST /interactions/retries': handler,
+			},
+		});
+	});
+
+	it('rejects an invalid discovered channel export', () => {
+		expect(() =>
+			normalizeBuiltModules({ support: agentModule() }, {}, { slack: { channel: null } }),
+		).toThrow(
+			'[flue] Channel "slack" must export a created channel as the named "channel" binding.',
+		);
+	});
+
+	it('rejects duplicate channel method and path declarations', () => {
+		const handler = () => new Response('ok');
+
+		expect(() =>
+			normalizeBuiltModules(
+				{ support: agentModule() },
+				{},
+				{
+					slack: {
+						channel: {
+							routes: [
+								{ method: 'POST', path: '/events', handler },
+								{ method: 'POST', path: '/events', handler },
+							],
+						},
+					},
+				},
+			),
+		).toThrow('[flue] Channel "slack" declares duplicate route "POST /events".');
+	});
+
+	it('rejects a channel route path that escapes its namespace', () => {
+		expect(() =>
+			normalizeBuiltModules(
+				{ support: agentModule() },
+				{},
+				{
+					slack: {
+						channel: {
+							routes: [{ method: 'POST', path: '/../events', handler: () => new Response('ok') }],
+						},
+					},
+				},
+			),
+		).toThrow('[flue] Channel "slack" route path must remain beneath its channel namespace.');
+	});
+
+	it('rejects malformed channel route methods and suffixes', () => {
+		const normalize = (route: Record<string, unknown>) =>
+			normalizeBuiltModules(
+				{ support: agentModule() },
+				{},
+				{ slack: { channel: { routes: [route] } } },
+			);
+
+		expect(() =>
+			normalize({ method: 'post', path: '/events', handler: () => new Response('ok') }),
+		).toThrow('route method must contain only uppercase ASCII letters');
+		expect(() =>
+			normalize({ method: 'POST', path: '/', handler: () => new Response('ok') }),
+		).toThrow('route path must be a non-empty absolute suffix without a query or fragment');
+		expect(() =>
+			normalize({
+				method: 'POST',
+				path: '/events?source=provider',
+				handler: () => new Response('ok'),
+			}),
+		).toThrow('route path must be a non-empty absolute suffix without a query or fragment');
 	});
 });

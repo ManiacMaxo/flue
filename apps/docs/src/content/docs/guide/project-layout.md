@@ -4,7 +4,7 @@ description: Understand the source files and generated output in a Flue project.
 lastReviewedAt: 2026-05-29
 ---
 
-Flue discovers application entrypoints from your project's source directory. Use `src/` for new projects, with `app.ts`, `cloudflare.ts`, `agents/`, and `workflows/` defining the application surfaces Flue builds.
+Flue discovers application entrypoints from your project's source directory. Use `src/` for new projects, with `app.ts`, `cloudflare.ts`, `agents/`, `workflows/`, and `channels/` defining the application surfaces Flue builds.
 
 ## Example project layout
 
@@ -17,8 +17,10 @@ my-project/
 │  ├─ cloudflare.ts
 │  ├─ agents/
 │  │  └─ support-assistant.ts
-│  └─ workflows/
-│     └─ summarize-ticket.ts
+│  ├─ workflows/
+│  │  └─ summarize-ticket.ts
+│  └─ channels/
+│     └─ github.ts
 └─ dist/
 ```
 
@@ -32,6 +34,7 @@ Organize supporting application code however you prefer inside `src/`. The files
 | `cloudflare.ts` | Optional Cloudflare-only module for Worker exports and non-HTTP handlers.             | [Cloudflare](/docs/ecosystem/deploy/cloudflare/#extending-the-worker) |
 | `agents/`       | Addressable agents that can receive continuing interactions over time.                | [Agents](/docs/guide/building-agents/)                                |
 | `workflows/`    | Finite operations that receive input and return a result.                             | [Workflows](/docs/guide/workflows/)                                   |
+| `channels/`     | Verified provider HTTP ingress discovered by filename.                                | [Channels](/docs/guide/channels/)                                     |
 
 ### `app.ts`
 
@@ -61,6 +64,19 @@ Keep workflow files flat inside `workflows/`; nested files are not discovered as
 
 For more information, see [Workflows](/docs/guide/workflows/).
 
+### `channels/`
+
+The `channels/` directory contains provider HTTP integrations. Each immediate
+file must export one named `channel` binding. Its filename becomes an immutable
+namespace: `src/channels/github.ts` publishes provider-declared routes beneath
+`/channels/github`.
+
+Nested files are ordinary support modules and are not discovered as channels.
+Every route has a provider-owned non-empty suffix such as `/webhook`, `/events`,
+or `/interactions`; `/channels/github` itself is not an endpoint.
+
+For more information, see [Channels](/docs/guide/channels/).
+
 ## Source directory
 
 `src/` is the canonical source directory for new Flue projects. When integrating Flue into another application or maintaining an existing layout, authored modules may instead live in `.flue/` or at the project root. Flue selects one source directory in this order:
@@ -69,7 +85,7 @@ For more information, see [Workflows](/docs/guide/workflows/).
 2. `src/` **(Recommended)** — The recommended layout for new projects.
 3. The project root — A compact layout for small dedicated projects.
 
-The first matching directory wins. Flue does not merge layouts: when `.flue/` exists, it does not discover agents, workflows, `app.ts`, or `cloudflare.ts` from `src/` or the project root. Authored modules may still import ordinary supporting code from elsewhere in the project.
+The first matching directory wins. Flue does not merge layouts: when `.flue/` exists, it does not discover agents, workflows, channels, `app.ts`, or `cloudflare.ts` from `src/` or the project root. Authored modules may still import ordinary supporting code from elsewhere in the project.
 
 The source directory is always discovered relative to your project root. To configure the project root, see [Configuration](/docs/reference/configuration/).
 

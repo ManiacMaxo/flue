@@ -12,7 +12,9 @@
 			"ignoreDependencies": ["bgproc", "just-bash"]
 		},
 		"examples/*": {
-			"entry": ["{src/{app,cloudflare,agents/*,workflows/*},flue.config}.{ts,mts,js,mjs}"],
+			"entry": [
+				"{src/{app,cloudflare,agents/*,workflows/*,channels/*},flue.config}.{ts,mts,js,mjs}"
+			],
 			"project": ["src/**/*.{ts,mts,js,mjs}"]
 		},
 

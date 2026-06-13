@@ -1,6 +1,7 @@
 /** Node.js build plugin. Produces a server for workflow runs and agent interactions. */
 import {
 	agentVarName,
+	channelVarName,
 	generateBuiltModuleNormalizationSource,
 	workflowVarName,
 } from './generated-entry-normalization.ts';
@@ -11,7 +12,7 @@ export class NodePlugin implements BuildPlugin {
 	bundle: BuildPlugin['bundle'] = 'vite';
 
 	generateEntryPoint(ctx: BuildContext): string {
-		const { agents, appEntry, dbEntry, workflows } = ctx;
+		const { agents, appEntry, channels, dbEntry, workflows } = ctx;
 		const runtimeVersion = JSON.stringify(ctx.runtimeVersion);
 
 		const agentImports = agents
@@ -27,6 +28,12 @@ export class NodePlugin implements BuildPlugin {
 				return `import * as ${varName} from ${JSON.stringify(workflow.filePath.replace(/\\/g, '/'))};`;
 			})
 			.join('\n');
+		const channelImports = channels
+			.map((channel, index) => {
+				const varName = channelVarName(channel.name, index);
+				return `import * as ${varName} from ${JSON.stringify(channel.filePath.replace(/\\/g, '/'))};`;
+			})
+			.join('\n');
 
 		const agentModuleEntries = agents
 			.map((a, index) => `  ${JSON.stringify(a.name)}: ${agentVarName(a.name, index)},`)
@@ -35,6 +42,12 @@ export class NodePlugin implements BuildPlugin {
 			.map(
 				(workflow, index) =>
 					`  ${JSON.stringify(workflow.name)}: ${workflowVarName(workflow.name, index)},`,
+			)
+			.join('\n');
+		const channelModuleEntries = channels
+			.map(
+				(channel, index) =>
+					`  ${JSON.stringify(channel.name)}: ${channelVarName(channel.name, index)},`,
 			)
 			.join('\n');
 
@@ -77,6 +90,7 @@ import {
 } from '@flue/runtime/internal';
 ${agentImports}
 ${workflowImports}
+${channelImports}
 ${userAppImport}
 ${userDbImport}
 
@@ -91,8 +105,11 @@ ${agentModuleEntries}
 const workflowModules = {
 ${workflowModuleEntries}
 };
-const normalized = normalizeBuiltModules(agentModules, workflowModules);
-const { manifest, createdAgents, dispatchAgentNames, workflowHandlers, localWorkflowHandlers, agentRouteMiddleware, workflowRouteMiddleware } = normalized;
+const channelModules = {
+${channelModuleEntries}
+};
+const normalized = normalizeBuiltModules(agentModules, workflowModules, channelModules);
+const { manifest, createdAgents, dispatchAgentNames, workflowHandlers, localWorkflowHandlers, agentRouteMiddleware, workflowRouteMiddleware, channelHandlers } = normalized;
 
 const isLocalMode = process.env.FLUE_MODE === 'local';
 const localCliTarget = process.env.FLUE_CLI_TARGET;
@@ -213,6 +230,7 @@ configureFlueRuntime({
   workflowHandlers,
   agentRouteMiddleware,
   workflowRouteMiddleware,
+  channelHandlers,
   createContext: createContextForRequest,
   runStore,
   eventStreamStore,

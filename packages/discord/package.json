@@ -30,13 +30,11 @@
 		"test": "vitest run",
 		"test:workerd": "vitest run --config vitest.workerd.config.ts"
 	},
-	"peerDependencies": {
-		"@flue/runtime": "workspace:^"
+	"dependencies": {
+		"hono": "4.12.22"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "0.16.15",
-		"@flue/runtime": "workspace:*",
-		"hono": "4.12.22",
 		"tsdown": "^0.22.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.6"

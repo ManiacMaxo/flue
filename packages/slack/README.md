@@ -1,42 +1,42 @@
 # `@flue/slack`
 
-First-party Slack events, interactions, and outbound-tool integration for Flue.
+Verified Slack Events API and interactivity ingress for Flue applications.
 
 ```ts
-const slack = createSlackChannel({
-	signingSecret: process.env.SLACK_SIGNING_SECRET!,
-	botToken: process.env.SLACK_BOT_TOKEN!,
-	appId: process.env.SLACK_APP_ID!,
-	teamId: process.env.SLACK_TEAM_ID!,
-});
+import { createSlackChannel } from '@flue/slack';
 
-slack.on('app_mention', async (event) => {
-	// Choose the agent, instance id, and dispatched input in application code.
-});
+export const channel = createSlackChannel({
+  signingSecret: process.env.SLACK_SIGNING_SECRET!,
+  appId: process.env.SLACK_APP_ID!,
+  teamId: process.env.SLACK_TEAM_ID!,
 
-app.mount('/webhooks/slack/events', slack.routes.events());
-app.mount('/webhooks/slack/interactions', slack.routes.interactions());
+  // Path: /channels/slack/events
+  async events({ event }) {
+    await handleEvent(event);
+  },
+
+  // Omit this callback to omit the route.
+  // Path: /channels/slack/interactions
+  async interactions({ interaction }) {
+    await handleInteraction(interaction);
+  },
+});
 ```
 
-Both routes verify the exact request bytes and reject timestamps outside Slack's
-five-minute freshness window. Mount them before body-parsing middleware.
-`api_app_id` and workspace identity are checked before application handlers.
-This fixed-workspace v1 rejects org-installed interaction payloads.
+Place this export in `channels/slack.ts`. Flue discovers configured surfaces at
+`/channels/slack/events` and `/channels/slack/interactions` relative to the
+`flue()` mount. At least one callback is required.
 
-Events API handlers support `app_mention` and plain user `message` events.
-Message subtypes and bot messages are acknowledged and ignored. Retry metadata
-is exposed but deliveries are not deduplicated.
+The package verifies exact request bytes and Slack's timestamp window, handles
+URL verification internally, checks configured app and workspace identity, and
+normalizes known and unknown verified payloads. Returning nothing produces an
+empty `200`; JSON values, Slack view-validation bodies, and ordinary Hono
+responses are supported.
 
-Interactivity supports message-backed `block_actions` with acknowledgement-only
-responses and modal `view_submission` handlers with acknowledgement or field
-validation errors. `response_url` capabilities are not exposed to agent tools.
+This package does not include an outbound Slack client or model tools. Run
+`flue add slack` to generate editable project code using the Slack Web API or a
+target-compatible Fetch client and application-owned `defineTool(...)` values.
 
-The default handler deadline is 2.5 seconds. A successful response means the
-handler completed, but a timed-out handler cannot be forcibly cancelled and may
-still complete after Slack receives a failure response. Application-owned
-delivery claims are required when duplicate admission is unacceptable.
-
-`slack.client` provides thread replies and root reactions through the configured
-bot token. `slack.tools` pre-binds the trusted workspace/thread destination.
-The token's ownership by the configured app/workspace is a trusted application
-configuration assertion; no startup identity request is made.
+Conversation keys are stable thread identifiers, not authorization
+capabilities. The package is stateless and does not deduplicate Events API
+retries.

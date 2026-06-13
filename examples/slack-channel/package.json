@@ -4,15 +4,19 @@
 	"type": "module",
 	"scripts": {
 		"build": "flue build --target node",
-		"check:types": "tsc --noEmit"
+		"check:types": "tsc --noEmit",
+		"test": "vitest run --config vitest.workerd.config.ts"
 	},
 	"dependencies": {
 		"@flue/runtime": "workspace:*",
 		"@flue/slack": "workspace:*",
-		"hono": "4.12.22"
+		"@slack/web-api": "^8.0.0-rc.1"
 	},
 	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "0.16.15",
 		"@flue/cli": "workspace:*",
-		"typescript": "^6.0.3"
+		"agents": "^0.14.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.6"
 	}
 }

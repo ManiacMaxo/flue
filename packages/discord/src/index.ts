@@ -1,32 +1,34 @@
-import { defineTool, type ToolDefinition } from '@flue/runtime/tool';
-import { createDiscordClient } from './client.ts';
-import {
-	DuplicateDiscordHandlerError,
-	InvalidDiscordConversationKeyError,
-	InvalidDiscordInputError,
-} from './errors.ts';
+import type { Context, Env, Handler } from 'hono';
+import { InvalidDiscordConversationKeyError, InvalidDiscordInputError } from './errors.ts';
 import { createDiscordInteractionsHandler } from './routes.ts';
 
-export {
-	DiscordApiError,
-	DiscordRateLimitError,
-	DiscordTimeoutError,
-	DuplicateDiscordHandlerError,
-	InvalidDiscordConversationKeyError,
-	InvalidDiscordInputError,
-} from './errors.ts';
+export { InvalidDiscordConversationKeyError, InvalidDiscordInputError } from './errors.ts';
 
-/** Credentials, trusted application identity, and transport settings. */
-export interface DiscordChannelOptions {
+export type JsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| JsonValue[]
+	| { [key: string]: JsonValue };
+
+export interface ChannelRoute<E extends Env = Env> {
+	readonly method: string;
+	readonly path: string;
+	readonly handler: Handler<E>;
+}
+
+/** Ingress configuration for one fixed Discord application. */
+export interface DiscordChannelOptions<E extends Env = Env> {
 	/** 32-byte Discord application public key encoded as 64 hexadecimal characters. */
 	publicKey: string;
 	/** Expected signed Discord application id. */
 	applicationId: string;
-	botToken: string;
-	/** Fetch implementation used by the outbound client. Defaults to `globalThis.fetch`. */
-	fetch?: typeof globalThis.fetch;
-	/** Outbound request timeout in milliseconds. Defaults to 10 seconds. */
-	requestTimeoutMs?: number;
+	/** Maximum request-body size in bytes. Defaults to 1 MiB. */
+	bodyLimit?: number;
+	/** Handler deadline in milliseconds. Defaults to and may not exceed 2500. */
+	handlerTimeoutMs?: number;
+	interactions(input: DiscordInteractionsHandlerInput<E>): DiscordHandlerResult;
 }
 
 /** Supported guild-channel, guild-thread, or bot-DM destination. */
@@ -57,7 +59,8 @@ export interface DiscordModalField {
 	value?: string;
 }
 
-export interface DiscordInteractionEnvelope<TData> {
+export interface DiscordInteractionEnvelope<TType extends string, TData> {
+	type: TType;
 	id: string;
 	applicationId: string;
 	/**
@@ -71,99 +74,53 @@ export interface DiscordInteractionEnvelope<TData> {
 	raw: unknown;
 }
 
+export type DiscordCommandInteraction = DiscordInteractionEnvelope<'command', DiscordCommandData>;
+export type DiscordComponentInteraction = DiscordInteractionEnvelope<
+	'component',
+	DiscordComponentData
+>;
+export type DiscordModalInteraction = DiscordInteractionEnvelope<'modal', DiscordModalData>;
+
+export interface DiscordUnknownInteraction {
+	type: 'unknown';
+	interactionType: number;
+	id: string;
+	applicationId: string;
+	token: string;
+	destination: DiscordDestinationRef;
+	raw: unknown;
+}
+
+export type DiscordInteraction =
+	| DiscordCommandInteraction
+	| DiscordComponentInteraction
+	| DiscordModalInteraction
+	| DiscordUnknownInteraction;
+
 /**
- * Provider-native component input accepted by the v1 serializers.
+ * Discord interaction callback response in provider wire format.
  *
- * Message components support action rows containing non-link buttons. Modal
- * components support Label components containing text inputs.
+ * The package checks JSON compatibility at runtime but does not duplicate
+ * Discord's full response schema.
  */
-export interface DiscordComponent {
+export interface DiscordInteractionResponse {
 	type: number;
-	customId?: string;
-	label?: string;
-	description?: string;
-	style?: number;
-	disabled?: boolean;
-	value?: string;
-	placeholder?: string;
-	required?: boolean;
-	minLength?: number;
-	maxLength?: number;
-	components?: readonly DiscordComponent[];
-	component?: DiscordComponent;
+	data?: JsonValue;
 }
 
-export interface DiscordMessage {
-	content: string;
-	components?: readonly DiscordComponent[];
-	/** Allowed mention expansion. Package serializers default to no parsed mentions. */
-	allowedMentions?: {
-		parse?: Array<'users' | 'roles' | 'everyone'>;
-		users?: string[];
-		roles?: string[];
-	};
+export type DiscordHandlerResult =
+	| DiscordInteractionResponse
+	| Response
+	| Promise<DiscordInteractionResponse | Response>;
+
+export interface DiscordInteractionsHandlerInput<E extends Env = Env> {
+	c: Context<E>;
+	interaction: DiscordInteraction;
 }
 
-/** Immediate response accepted from a chat-input command handler. */
-export type DiscordCommandResponse =
-	| { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-	| { type: 'modal'; customId: string; title: string; components: readonly DiscordComponent[] };
-/** Immediate response accepted from a button handler. */
-export type DiscordComponentResponse =
-	| { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-	| { type: 'update_message'; message: DiscordMessage }
-	| { type: 'modal'; customId: string; title: string; components: readonly DiscordComponent[] };
-/** Immediate response accepted from a modal-submission handler. */
-export type DiscordModalResponse =
-	| { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-	| { type: 'update_message'; message: DiscordMessage };
-
-export type DiscordInteractionHandler<TInteraction, TResponse> = (
-	interaction: TInteraction,
-) => TResponse | Promise<TResponse>;
-export type DiscordRouteHandler = (request: Request) => Promise<Response>;
-
-export interface DiscordInteractionRouteOptions {
-	/** Maximum request-body size in bytes. Defaults to 1 MiB. */
-	bodyLimit?: number;
-	/** Handler deadline in milliseconds. Defaults to and may not exceed 2500. */
-	handlerTimeoutMs?: number;
-}
-
-/** Fixed-origin Discord API v10 writes. Methods do not retry automatically. */
-export interface DiscordClient {
-	postMessage(ref: DiscordDestinationRef, message: DiscordMessage, signal?: AbortSignal): Promise<void>;
-}
-
-export interface DiscordMessageToolOptions {
-	/** Mention classes enabled by trusted application code. Defaults to none. */
-	allowMentions?: Array<'users' | 'roles' | 'everyone'>;
-}
-
-/** Verified interactions, outbound client/tools, and canonical identity helpers. */
-export interface DiscordChannel {
-	readonly routes: {
-		interactions(options?: DiscordInteractionRouteOptions): DiscordRouteHandler;
-	};
-	readonly client: DiscordClient;
-	readonly tools: {
-		postMessage(ref: DiscordDestinationRef, options?: DiscordMessageToolOptions): ToolDefinition;
-	};
-	/** Registers the sole response-producing handler for a chat-input command name. */
-	onCommand(
-		name: string,
-		handler: DiscordInteractionHandler<DiscordInteractionEnvelope<DiscordCommandData>, DiscordCommandResponse>,
-	): () => void;
-	/** Registers the sole response-producing handler for a button custom id. */
-	onComponent(
-		customId: string,
-		handler: DiscordInteractionHandler<DiscordInteractionEnvelope<DiscordComponentData>, DiscordComponentResponse>,
-	): () => void;
-	/** Registers the sole response-producing handler for a modal custom id. */
-	onModal(
-		customId: string,
-		handler: DiscordInteractionHandler<DiscordInteractionEnvelope<DiscordModalData>, DiscordModalResponse>,
-	): () => void;
+/** Verified interactions and canonical identity helpers. */
+export interface DiscordChannel<E extends Env = Env> {
+	readonly routes: readonly ChannelRoute<E>[];
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: DiscordDestinationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -173,77 +130,25 @@ export interface DiscordChannel {
 /**
  * Creates a fixed-application Discord HTTP interactions channel.
  *
- * PING is handled internally. Successful interactions wait for the registered
+ * PING is handled internally. Successful interactions wait for the configured
  * handler, and the channel does not deduplicate interaction ids.
  */
-export function createDiscordChannel(options: DiscordChannelOptions): DiscordChannel {
+export function createDiscordChannel<E extends Env = Env>(
+	options: DiscordChannelOptions<E>,
+): DiscordChannel<E> {
 	const publicKey = validateOptions(options);
 	const applicationId = options.applicationId;
-	const client = createDiscordClient(options);
-	const commandHandlers = new Map<
-		string,
-		DiscordInteractionHandler<DiscordInteractionEnvelope<DiscordCommandData>, DiscordCommandResponse>
-	>();
-	const componentHandlers = new Map<
-		string,
-		DiscordInteractionHandler<
-			DiscordInteractionEnvelope<DiscordComponentData>,
-			DiscordComponentResponse
-		>
-	>();
-	const modalHandlers = new Map<
-		string,
-		DiscordInteractionHandler<DiscordInteractionEnvelope<DiscordModalData>, DiscordModalResponse>
-	>();
+	const interactions = options.interactions;
+	const handler = createDiscordInteractionsHandler({
+		publicKey,
+		applicationId,
+		bodyLimit: options.bodyLimit,
+		handlerTimeoutMs: options.handlerTimeoutMs,
+		interactions,
+	});
 
-	const channel: DiscordChannel = {
-		routes: {
-			interactions: (routeOptions) =>
-				createDiscordInteractionsHandler({
-					publicKey,
-					applicationId,
-					bodyLimit: routeOptions?.bodyLimit,
-					handlerTimeoutMs: routeOptions?.handlerTimeoutMs,
-					getCommandHandler: (name) => commandHandlers.get(name),
-					getComponentHandler: (customId) => componentHandlers.get(customId),
-					getModalHandler: (customId) => modalHandlers.get(customId),
-				}),
-		},
-		client,
-		tools: {
-			postMessage: (ref, toolOptions = {}) => {
-				assertDestinationRef(ref);
-				const allowMentions = validateMentionClasses(toolOptions.allowMentions);
-				const boundRef = snapshotDestinationRef(ref);
-				return defineTool({
-					name: 'discord_post_message',
-					description: 'Post a message to the bound Discord destination.',
-					parameters: {
-						type: 'object',
-						properties: { text: { type: 'string', minLength: 1 } },
-						required: ['text'],
-						additionalProperties: false,
-					},
-					execute: async ({ text }, signal) => {
-						await client.postMessage(
-							boundRef,
-							{ content: text, allowedMentions: { parse: allowMentions } },
-							signal,
-						);
-						return 'Message posted.';
-					},
-				});
-			},
-		},
-		onCommand(name, handler) {
-			return registerOne(commandHandlers, name, handler, 'command');
-		},
-		onComponent(customId, handler) {
-			return registerOne(componentHandlers, customId, handler, 'component');
-		},
-		onModal(customId, handler) {
-			return registerOne(modalHandlers, customId, handler, 'modal');
-		},
+	const channel: DiscordChannel<E> = {
+		routes: [{ method: 'POST', path: '/interactions', handler }],
 		conversationKey(ref) {
 			assertDestinationRef(ref);
 			if (ref.type === 'guild') {
@@ -270,7 +175,10 @@ export function createDiscordChannel(options: DiscordChannelOptions): DiscordCha
 				}
 				const dmChannelId = /^discord:v1:dm:([^:]+)$/.exec(id)?.[1];
 				if (!dmChannelId) throw new InvalidDiscordConversationKeyError();
-				const ref: DiscordDestinationRef = { type: 'dm', channelId: decodeURIComponent(dmChannelId) };
+				const ref: DiscordDestinationRef = {
+					type: 'dm',
+					channelId: decodeURIComponent(dmChannelId),
+				};
 				assertDestinationRef(ref);
 				if (channel.conversationKey(ref) !== id) throw new InvalidDiscordConversationKeyError();
 				return ref;
@@ -284,67 +192,16 @@ export function createDiscordChannel(options: DiscordChannelOptions): DiscordCha
 	return channel;
 }
 
-function registerOne<TKey, THandler>(
-	handlers: Map<TKey, THandler>,
-	key: TKey,
-	handler: THandler,
-	kind: 'command' | 'component' | 'modal',
-): () => void {
-	if (typeof key !== 'string' || key.length === 0 || key.trim() !== key) {
-		throw new InvalidDiscordInputError(`${kind} key`);
-	}
-	if (typeof handler !== 'function') {
-		throw new TypeError(`Discord ${kind} handler must be a function.`);
-	}
-	if (handlers.has(key)) throw new DuplicateDiscordHandlerError(kind, key);
-	handlers.set(key, handler);
-	let active = true;
-	return () => {
-		if (!active) return false;
-		active = false;
-		if (handlers.get(key) !== handler) return false;
-		return handlers.delete(key);
-	};
-}
-
-function validateOptions(options: DiscordChannelOptions): Uint8Array {
+function validateOptions<E extends Env>(options: DiscordChannelOptions<E>): Uint8Array {
 	if (!options || typeof options !== 'object') throw new InvalidDiscordInputError('options');
 	if (!/^[0-9a-fA-F]{64}$/.test(options.publicKey)) {
 		throw new InvalidDiscordInputError('publicKey');
 	}
 	assertIdentifier(options.applicationId, 'applicationId');
-	assertIdentifier(options.botToken, 'botToken');
-	if (
-		options.requestTimeoutMs !== undefined &&
-		(!Number.isSafeInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
-	) {
-		throw new InvalidDiscordInputError('requestTimeoutMs');
+	if (typeof options.interactions !== 'function') {
+		throw new InvalidDiscordInputError('interactions');
 	}
 	return decodeHex(options.publicKey);
-}
-
-function validateMentionClasses(
-	value: Array<'users' | 'roles' | 'everyone'> | undefined,
-): Array<'users' | 'roles' | 'everyone'> {
-	if (
-		value !== undefined &&
-		(!Array.isArray(value) ||
-			value.some((item) => item !== 'users' && item !== 'roles' && item !== 'everyone'))
-	) {
-		throw new InvalidDiscordInputError('allowMentions');
-	}
-	return [...(value ?? [])];
-}
-
-function snapshotDestinationRef(ref: DiscordDestinationRef): DiscordDestinationRef {
-	return ref.type === 'guild'
-		? {
-				type: 'guild',
-				guildId: ref.guildId,
-				channelId: ref.channelId,
-				channelKind: ref.channelKind,
-			}
-		: { type: 'dm', channelId: ref.channelId };
 }
 
 function assertDestinationRef(ref: DiscordDestinationRef): void {

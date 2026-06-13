@@ -5,5 +5,4 @@ export default defineConfig({
 	format: ['esm'],
 	dts: true,
 	clean: true,
-	deps: { neverBundle: ['@flue/runtime', '@flue/runtime/tool'] },
 });

@@ -1,152 +1,106 @@
 ---
 title: Discord Channel API
-description: Reference for @flue/discord.
-lastReviewedAt: 2026-06-12
+description: Reference for verified Discord HTTP interactions from @flue/discord.
+lastReviewedAt: 2026-06-13
 ---
 
-Import the Discord channel API from `@flue/discord`.
+Import from `@flue/discord`.
 
 ## `createDiscordChannel()`
 
 ```ts
-function createDiscordChannel(options: DiscordChannelOptions): DiscordChannel;
+function createDiscordChannel<E extends Env = Env>(
+  options: DiscordChannelOptions<E>,
+): DiscordChannel<E>;
 ```
 
-Creates one fixed-application HTTP interactions integration.
+Creates one stateless, fixed-application HTTP interactions channel. The
+callback is stored during construction and runs only after Ed25519 verification
+and application identity checks.
 
-### `DiscordChannelOptions`
-
-| Field              | Type                      | Default                               |
-| ------------------ | ------------------------- | ------------------------------------- |
-| `publicKey`        | `string`                  | Required 64-character hexadecimal key |
-| `applicationId`    | `string`                  | Required                              |
-| `botToken`         | `string`                  | Required                              |
-| `fetch`            | `typeof globalThis.fetch` | `globalThis.fetch`                    |
-| `requestTimeoutMs` | `number`                  | `10000`                               |
-
-## `DiscordChannel`
-
-### `routes.interactions()`
+## `DiscordChannelOptions`
 
 ```ts
-interactions(options?: DiscordInteractionRouteOptions): DiscordRouteHandler;
-```
-
-Returns an unbound-safe Fetch handler. `bodyLimit` defaults to 1 MiB.
-`handlerTimeoutMs` defaults to and may not exceed 2500. Signed PING requests are
-handled internally.
-
-### Handlers
-
-```ts
-onCommand(
-  name: string,
-  handler: DiscordInteractionHandler<
-    DiscordInteractionEnvelope<DiscordCommandData>,
-    DiscordCommandResponse
-  >,
-): () => void;
-
-onComponent(
-  customId: string,
-  handler: DiscordInteractionHandler<
-    DiscordInteractionEnvelope<DiscordComponentData>,
-    DiscordComponentResponse
-  >,
-): () => void;
-
-onModal(
-  customId: string,
-  handler: DiscordInteractionHandler<
-    DiscordInteractionEnvelope<DiscordModalData>,
-    DiscordModalResponse
-  >,
-): () => void;
-```
-
-Each command or custom id has one response owner.
-
-Command handlers accept chat-input commands. Component handlers accept buttons.
-Modal handlers receive normalized `fields` while retaining provider-native
-components.
-
-Supported immediate responses:
-
-```ts
-type DiscordCommandResponse =
-  | { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-  | {
-      type: 'modal';
-      customId: string;
-      title: string;
-      components: readonly DiscordComponent[];
-    };
-
-type DiscordComponentResponse =
-  | { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-  | { type: 'update_message'; message: DiscordMessage }
-  | {
-      type: 'modal';
-      customId: string;
-      title: string;
-      components: readonly DiscordComponent[];
-    };
-
-type DiscordModalResponse =
-  | { type: 'message'; message: DiscordMessage; ephemeral?: boolean }
-  | { type: 'update_message'; message: DiscordMessage };
-```
-
-Immediate message responses disable parsed mentions by default.
-
-### Components
-
-`DiscordMessage.components` supports action rows containing non-link buttons
-with `customId`, `label`, `style`, and optional `disabled`.
-
-Modal responses support Label components containing text inputs with
-`customId`, `style`, optional placeholder/required state, and optional minimum
-or maximum length.
-
-```ts
-interface DiscordMessage {
-  content: string;
-  components?: readonly DiscordComponent[];
-  allowedMentions?: {
-    parse?: Array<'users' | 'roles' | 'everyone'>;
-    users?: string[];
-    roles?: string[];
-  };
+interface DiscordChannelOptions<E extends Env = Env> {
+  publicKey: string;
+  applicationId: string;
+  bodyLimit?: number;
+  handlerTimeoutMs?: number;
+  interactions(input: { c: Context<E>; interaction: DiscordInteraction }): DiscordHandlerResult;
 }
 ```
 
-### `client`
+| Field              | Description                                      |
+| ------------------ | ------------------------------------------------ |
+| `publicKey`        | 32-byte public key as 64 hexadecimal characters. |
+| `applicationId`    | Expected signed Discord application id.          |
+| `bodyLimit`        | Maximum request body in bytes. Default: 1 MiB.   |
+| `handlerTimeoutMs` | Handler deadline. Default: 2500; maximum: 2500.  |
+| `interactions`     | Receives every verified non-PING interaction.    |
 
 ```ts
-postMessage(
-  ref: DiscordDestinationRef,
-  message: DiscordMessage,
-  signal?: AbortSignal,
-): Promise<void>;
+type DiscordHandlerResult =
+  | DiscordInteractionResponse
+  | Response
+  | Promise<DiscordInteractionResponse | Response>;
+
+interface DiscordInteractionResponse {
+  type: number;
+  data?: JsonValue;
+}
 ```
 
-Posts an ordinary message through the fixed Discord API v10 origin. Writes are
-not retried automatically. Parsed mentions default to disabled unless
-`allowedMentions` explicitly enables them.
+Discord requires an interaction response. Return provider wire-format JSON or
+an ordinary Hono or Fetch `Response`. The runtime checks only JSON
+compatibility; use `discord-api-types` for complete provider response types.
 
-### `tools.postMessage()`
+## `DiscordChannel`
 
 ```ts
-postMessage(
-  ref: DiscordDestinationRef,
-  options?: DiscordMessageToolOptions,
-): ToolDefinition;
+interface DiscordChannel<E extends Env = Env> {
+  readonly routes: readonly ChannelRoute<E>[];
+  conversationKey(ref: DiscordDestinationRef): string;
+  parseConversationKey(id: string): DiscordDestinationRef;
+}
 ```
 
-Snapshots the destination and mention policy. `allowMentions` defaults to no
-mention classes.
+`routes` contains one `POST /interactions` declaration. A file named
+`channels/discord.ts` is served at `/channels/discord/interactions` relative to
+the `flue()` mount.
 
-### `DiscordDestinationRef`
+## Interactions
+
+```ts
+type DiscordInteraction =
+  | DiscordCommandInteraction
+  | DiscordComponentInteraction
+  | DiscordModalInteraction
+  | DiscordUnknownInteraction;
+```
+
+Known variants use `type: 'command'`, `type: 'component'`, or `type: 'modal'`.
+Each exposes:
+
+```ts
+interface DiscordInteractionEnvelope<TType extends string, TData> {
+  type: TType;
+  id: string;
+  applicationId: string;
+  token: string;
+  destination: DiscordDestinationRef;
+  data: TData;
+  raw: unknown;
+}
+```
+
+Unsupported verified interaction types use `type: 'unknown'` and retain the
+numeric `interactionType`. PING is handled internally and returns PONG without
+invoking `interactions`.
+
+`token` and `raw` may contain sensitive provider capabilities. Keep them out of
+dispatched input, model context, logs, and durable history.
+
+## Identity
 
 ```ts
 type DiscordDestinationRef =
@@ -162,31 +116,15 @@ type DiscordDestinationRef =
     };
 ```
 
-### Conversation keys
-
-```ts
-conversationKey(ref: DiscordDestinationRef): string;
-parseConversationKey(id: string): DiscordDestinationRef;
-```
-
-Supported refs are guild channels, guild threads, and bot DMs. Keys are
-canonical identifiers, not authorization capabilities.
-
-## Sensitive interaction fields
-
-`DiscordInteractionEnvelope.token` and `raw` are handler-level provider
-capabilities. Do not place them in dispatch input, model context, logs, or
-durable session history.
+Conversation keys are canonical identifiers, not authorization capabilities.
 
 ## Errors
 
-| Error                                | Structured fields                                                                                                    |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `DuplicateDiscordHandlerError`       | `kind`, `key`                                                                                                        |
-| `InvalidDiscordConversationKeyError` | —                                                                                                                    |
-| `InvalidDiscordInputError`           | `field`                                                                                                              |
-| `DiscordApiError`                    | `status`, `code`, `requestId`, `responseMessage`, `retryAfterSeconds`, `global`, `rateLimitScope`, `rateLimitBucket` |
-| `DiscordRateLimitError`              | Same as `DiscordApiError`                                                                                            |
-| `DiscordTimeoutError`                | `timeoutMs`                                                                                                          |
+- `InvalidDiscordConversationKeyError`
+- `InvalidDiscordInputError`, with structured `field`
 
-See [Discord setup](/docs/guide/channels/discord/) for an end-to-end example.
+The package does not apply an invented timestamp freshness window or
+deduplicate interaction ids.
+
+See [Discord setup](/docs/guide/channels/discord/) for composition with
+`@discordjs/rest` and application-owned tools.

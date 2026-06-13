@@ -15,16 +15,16 @@ The CLI requires Node.js `>=22.18.0`. Cloudflare development and deployment also
 
 ## Commands
 
-| Command                              | Description                                                 |
-| ------------------------------------ | ----------------------------------------------------------- |
-| [`flue init`](/docs/cli/init/)       | Create an initial `flue.config.ts`.                         |
-| [`flue dev`](/docs/cli/dev/)         | Start a watch-mode local development server.                |
-| [`flue run`](/docs/cli/run/)         | Execute one workflow invocation locally.                    |
-| [`flue connect`](/docs/cli/connect/) | Open an interactive local agent-instance connection.        |
-| [`flue build`](/docs/cli/build/)     | Create deployable application artifacts.                    |
-| [`flue logs`](/docs/cli/logs/)       | Replay or follow workflow-run events from a running server. |
-| [`flue add`](/docs/cli/add/)         | Fetch connector installation recipes for a coding agent.    |
-| [`flue docs`](/docs/cli/docs/)       | List, read, and search the bundled Flue documentation.      |
+| Command                              | Description                                                       |
+| ------------------------------------ | ----------------------------------------------------------------- |
+| [`flue init`](/docs/cli/init/)       | Create an initial `flue.config.ts`.                               |
+| [`flue dev`](/docs/cli/dev/)         | Start a watch-mode local development server.                      |
+| [`flue run`](/docs/cli/run/)         | Execute one workflow invocation locally.                          |
+| [`flue connect`](/docs/cli/connect/) | Open an interactive local agent-instance connection.              |
+| [`flue build`](/docs/cli/build/)     | Create deployable application artifacts.                          |
+| [`flue logs`](/docs/cli/logs/)       | Replay or follow workflow-run events from a running server.       |
+| [`flue add`](/docs/cli/add/)         | Fetch sandbox or channel installation recipes for a coding agent. |
+| [`flue docs`](/docs/cli/docs/)       | List, read, and search the bundled Flue documentation.            |
 
 ## Common application options
 

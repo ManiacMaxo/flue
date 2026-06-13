@@ -10,11 +10,10 @@ agent does the file-writing.
 
 ## Supported categories
 
-Flue currently supports **one** connector category:
-
-| Category  | Status    | Notes                                                     |
-| --------- | --------- | --------------------------------------------------------- |
-| `sandbox` | Supported | For remote sandbox providers (Daytona, E2B, Modal, etc.). |
+| Category  | Status    | Notes                                                         |
+| --------- | --------- | ------------------------------------------------------------- |
+| `sandbox` | Supported | Adapts remote execution providers to Flue's sandbox contract. |
+| `channel` | Supported | Adds verified provider ingress, an SDK client, and app tools. |
 
 > **Please don't open PRs introducing new categories.** Adding a category
 > requires CLI/runtime changes and a long-term maintenance commitment from
@@ -109,11 +108,15 @@ casing variants.
 
 ## Body conventions
 
-The body is the prompt an AI coding agent will read and act on. The
-existing connectors (`sandbox--daytona.md` and `sandbox--vercel.md`) are
-the template — match their structure as closely as possible, and only
-diverge where the specifics of the provider you're connecting genuinely
-require it.
+The body is the prompt an AI coding agent will read and act on. Follow the
+conventions for its category rather than forcing all connector types into one
+template.
+
+### Sandbox bodies
+
+The existing `sandbox--daytona.md` and `sandbox--vercel.md` files are the
+template. Match their structure unless the provider genuinely requires
+something different.
 
 For reference, the shape they share:
 
@@ -140,6 +143,26 @@ For reference, the shape they share:
 For category-root files (e.g. `sandbox.md`), instead of a verbatim TS file,
 point the agent at the spec doc on raw GitHub plus a known-good reference
 connector (e.g. `daytona`).
+
+### Channel bodies
+
+Channel recipes create editable project integration source rather than a
+universal adapter. They should:
+
+1. Inspect the target, source root, app entrypoint, agents, environment types,
+   and secret conventions.
+2. Install the first-party ingress package when one exists and the provider's
+   established outbound SDK.
+3. Create `channels/<provider>.ts` with named `channel` and `client` exports.
+4. Use constructor-owned verified callbacks and exact default path comments.
+5. Show optional unused protocol surfaces commented out.
+6. Dispatch only normalized provider input and stable delivery identity.
+7. Define only application-requested tools, with trusted destinations bound
+   outside model arguments.
+8. Verify with local signed payloads and the project's actual build target.
+
+Channel recipes must not imply a common provider client API, install generic
+tool collections, or add `app.ts` solely to mount a discovered channel.
 
 ## Adding a new connector
 

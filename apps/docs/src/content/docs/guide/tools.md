@@ -111,6 +111,45 @@ const harness = await init(agent, { tools: [lookupCustomerOrder] });
 
 Do not put credentials, tenant identifiers, or unrestricted destinations into model-selected tool arguments when trusted application code can supply them instead.
 
+## Use provider SDKs directly
+
+Channel integrations follow the same rule. Flue verifies inbound provider
+events, while your application uses the provider SDK and defines only the
+outbound actions its agents need:
+
+```ts title="src/channels/github.ts"
+import { defineTool } from '@flue/runtime';
+import { Octokit } from '@octokit/rest';
+
+export const client = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
+});
+
+export function commentOnIssue(ref: { owner: string; repo: string; issueNumber: number }) {
+  return defineTool({
+    name: 'comment_on_github_issue',
+    description: 'Comment on the GitHub issue bound to this agent.',
+    parameters: v.object({
+      body: v.string(),
+    }),
+    async execute({ body }) {
+      await client.rest.issues.createComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.issueNumber,
+        body,
+      });
+      return 'Comment posted.';
+    },
+  });
+}
+```
+
+The model controls the comment body. Trusted application code controls the
+token, repository, and issue. Avoid generic provider tools that expose
+arbitrary destinations or API methods unless the application has an explicit
+authorization design for them.
+
 ## Connect MCP servers
 
 An MCP server supplies remotely implemented tools. `connectMcpServer(...)` lists those tools and returns ordinary tool definitions, which you provide to agent work in the same way as your own custom tools.

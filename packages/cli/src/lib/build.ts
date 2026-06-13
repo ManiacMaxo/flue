@@ -6,7 +6,14 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { packageUpSync } from 'package-up';
 import { CloudflarePlugin } from './build-plugin-cloudflare.ts';
 import { NodePlugin } from './build-plugin-node.ts';
-import type { AgentInfo, BuildContext, BuildOptions, BuildPlugin, WorkflowInfo } from './types.ts';
+import type {
+	AgentInfo,
+	BuildContext,
+	BuildOptions,
+	BuildPlugin,
+	ChannelInfo,
+	WorkflowInfo,
+} from './types.ts';
 import { importAttributePlugin } from './vite-import-attribute-plugin.ts';
 
 /**
@@ -53,6 +60,7 @@ async function buildApplication(options: BuildOptions): Promise<BuildResult> {
 
 	const agents = discoverAgents(sourceRoot);
 	const workflows = discoverWorkflows(sourceRoot);
+	const channels = discoverChannels(sourceRoot);
 	const appEntry = discoverOptionalEntry(sourceRoot, 'app');
 	const cloudflareEntry = discoverOptionalEntry(sourceRoot, 'cloudflare');
 	const dbEntry = discoverOptionalEntry(sourceRoot, 'db');
@@ -85,6 +93,11 @@ async function buildApplication(options: BuildOptions): Promise<BuildResult> {
 			`[flue] Found ${workflows.length} workflow(s): ${workflows.map((workflow) => workflow.name).join(', ')}`,
 		);
 	}
+	if (channels.length > 0) {
+		console.log(
+			`[flue] Found ${channels.length} channel(s): ${channels.map((channel) => channel.name).join(', ')}`,
+		);
+	}
 	console.log(
 		`[flue] AGENTS.md and workspace .agents/skills/ will be discovered at runtime; imported SKILL.md directories are packaged by Vite`,
 	);
@@ -96,6 +109,7 @@ async function buildApplication(options: BuildOptions): Promise<BuildResult> {
 	const ctx: BuildContext = {
 		agents,
 		workflows,
+		channels,
 		root,
 		output,
 		appEntry,
@@ -265,7 +279,11 @@ function discoverWorkflows(sourceRoot: string): WorkflowInfo[] {
 	return discoverModules(sourceRoot, 'workflow');
 }
 
-function discoverModules(sourceRoot: string, kind: 'agent' | 'workflow'): AgentInfo[] {
+function discoverChannels(sourceRoot: string): ChannelInfo[] {
+	return discoverModules(sourceRoot, 'channel');
+}
+
+function discoverModules(sourceRoot: string, kind: 'agent' | 'workflow' | 'channel'): AgentInfo[] {
 	const modulesDir = path.join(sourceRoot, `${kind}s`);
 	if (!fs.existsSync(modulesDir)) return [];
 
@@ -276,13 +294,13 @@ function discoverModules(sourceRoot: string, kind: 'agent' | 'workflow'): AgentI
 	const modules: AgentInfo[] = [];
 	for (const file of files) {
 		const name = file.replace(/\.(ts|js|mts|mjs)$/, '');
-		// Agent names additionally ban ':' because agent addressing reserves
-		// it; workflow names dropped that restriction with run_<ulid> ids.
-		if (!name || (kind === 'agent' && name.includes(':'))) {
+		// Agent and channel names ban ':' because their URL addressing reserves
+		// a single filename-derived namespace segment.
+		if (!name || ((kind === 'agent' || kind === 'channel') && name.includes(':'))) {
 			throw new Error(
-				kind === 'agent'
-					? `[flue] Agent basename "${name}" is invalid. Agent names must be non-empty and must not contain ":".`
-					: `[flue] Workflow basename "${name}" is invalid. Workflow names must be non-empty.`,
+				kind === 'workflow'
+					? `[flue] Workflow basename "${name}" is invalid. Workflow names must be non-empty.`
+					: `[flue] ${kind === 'agent' ? 'Agent' : 'Channel'} basename "${name}" is invalid. ${kind === 'agent' ? 'Agent' : 'Channel'} names must be non-empty and must not contain ":".`,
 			);
 		}
 		const previous = seen.get(name);
