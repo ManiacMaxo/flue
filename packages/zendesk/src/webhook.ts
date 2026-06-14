@@ -242,7 +242,7 @@ function concatenate(prefix: Uint8Array, body: Uint8Array): Uint8Array {
 
 function serializeHandlerResult(value: unknown): Response {
 	if (value === undefined) return response(200);
-	if (value instanceof Response) return value;
+	if (Object.prototype.toString.call(value) === '[object Response]') return value as Response;
 	return Response.json(value);
 }
 
