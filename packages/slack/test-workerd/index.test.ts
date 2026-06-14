@@ -5,7 +5,7 @@ import { createSlackChannel } from '../src/index.ts';
 const encoder = new TextEncoder();
 
 describe('@flue/slack workerd ingress', () => {
-	it('verifies exact Events API bytes through the discovered route shape', async () => {
+	it('verifies exact Events API bytes when a provider-native event is received', async () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
@@ -13,9 +13,8 @@ describe('@flue/slack workerd ingress', () => {
 			teamId: 'T123',
 			events,
 		});
-		const app = new Hono();
-		for (const route of slack.routes) app.on(route.method, route.path, route.handler);
-		const body = ` {"type":"event_callback","api_app_id":"A123","team_id":"T123","event_id":"Ev1","event":{"type":"app_mention","channel":"C1","ts":"1.1","text":"café","user":"U1"}} `;
+		const app = channelApp(slack);
+		const body = ` {"token":"verification-token","type":"event_callback","api_app_id":"A123","team_id":"T123","event_id":"Ev1","event_time":1717971234,"event":{"type":"app_mention","channel":"C1","ts":"1.1","event_ts":"1.1","text":"café","user":"U1"}} `;
 		const timestamp = Math.floor(Date.now() / 1000);
 		const signature = await hmac(`v0:${timestamp}:${body}`);
 		const headers = {
@@ -38,9 +37,13 @@ describe('@flue/slack workerd ingress', () => {
 		expect(response.status).toBe(200);
 		expect(changed.status).toBe(401);
 		expect(events).toHaveBeenCalledOnce();
+		expect(events.mock.calls[0]?.[0].payload.event).toMatchObject({
+			type: 'app_mention',
+			text: 'café',
+		});
 	});
 
-	it('normalizes slash commands and shortcuts when running in workerd', async () => {
+	it('passes provider-native slash commands and shortcuts when running in workerd', async () => {
 		const commands = vi.fn();
 		const interactions = vi.fn();
 		const slack = createSlackChannel({
@@ -50,8 +53,7 @@ describe('@flue/slack workerd ingress', () => {
 			commands,
 			interactions,
 		});
-		const app = new Hono();
-		for (const route of slack.routes) app.on(route.method, route.path, route.handler);
+		const app = channelApp(slack);
 
 		const commandResponse = await app.request(
 			await signedFormRequest(
@@ -68,34 +70,36 @@ describe('@flue/slack workerd ingress', () => {
 				}).toString(),
 			),
 		);
+		const shortcut = {
+			type: 'shortcut',
+			team: { id: 'T123' },
+			user: { id: 'U123' },
+			callback_id: 'open_triage',
+			trigger_id: 'shortcut-trigger',
+		};
 		const shortcutResponse = await app.request(
 			await signedFormRequest(
 				'/interactions',
-				new URLSearchParams({
-					payload: JSON.stringify({
-						type: 'shortcut',
-						team: { id: 'T123' },
-						user: { id: 'U123' },
-						callback_id: 'open_triage',
-						trigger_id: 'shortcut-trigger',
-					}),
-				}).toString(),
+				new URLSearchParams({ payload: JSON.stringify(shortcut) }).toString(),
 			),
 		);
 
 		expect(commandResponse.status).toBe(200);
 		expect(shortcutResponse.status).toBe(200);
-		expect(commands.mock.calls[0]?.[0].command).toMatchObject({
-			type: 'slash_command',
+		expect(commands.mock.calls[0]?.[0].payload).toMatchObject({
 			command: '/triage',
 			text: 'incident 42',
+			trigger_id: 'command-trigger',
 		});
-		expect(interactions.mock.calls[0]?.[0].interaction).toMatchObject({
-			type: 'shortcut',
-			callbackId: 'open_triage',
-		});
+		expect(interactions.mock.calls[0]?.[0].payload).toEqual(shortcut);
 	});
 });
+
+function channelApp(channel: ReturnType<typeof createSlackChannel>): Hono {
+	const app = new Hono();
+	for (const route of channel.routes) app.on(route.method, route.path, route.handler);
+	return app;
+}
 
 async function hmac(value: string): Promise<string> {
 	const key = await crypto.subtle.importKey(

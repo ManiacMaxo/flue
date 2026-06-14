@@ -19,7 +19,7 @@ internally.
 Handlers complete dispatch admission before Slack is acknowledged. The default
 handler deadline is 2.5 seconds. A timed-out handler cannot be forcibly stopped
 and may still admit work after a failure response; Slack may retry Events API
-deliveries, so applications requiring uniqueness must claim `eventId` in
+deliveries, so applications requiring uniqueness must claim `payload.event_id` in
 durable application storage before dispatch.
 
 The bot token's ownership by the configured app/workspace is a trusted
@@ -30,10 +30,11 @@ The channel module exports both the ingress `channel` and the project-owned
 `WebClient`. The reply tool is deliberately narrow application policy, not a
 generic tool supplied by `@flue/slack`.
 
-Interactions and slash commands may expose short-lived `triggerId`,
-`responseUrl`, or view response URL capabilities under `capabilities`. Use them
-only inside trusted request handling. Never place them in dispatch input, model
-context, logs, or durable session data.
+Interactions and slash commands preserve Slack's native snake_case fields.
+Values such as `trigger_id`, `response_url`, and view `response_urls` are
+short-lived provider capabilities. Use them only inside trusted request
+handling. Never place them in dispatch input, model context, logs, or durable
+session data.
 
 This example uses the Fetch-based `@slack/web-api` v8 release candidate. Its
 typed `chat.postMessage()` path is exercised in workerd with Cloudflare's

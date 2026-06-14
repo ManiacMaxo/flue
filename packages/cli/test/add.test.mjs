@@ -306,14 +306,18 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('nodejs_compat'));
 	});
 
-	it('prints a named channel recipe without registry frontmatter', async () => {
+	it('prints provider-native payload guidance when the Slack recipe is requested', async () => {
 		const result = await runCli(['add', 'slack', '--print']);
 		assert.equal(result.code, 0);
 		assert.ok(result.stdout.startsWith('# Add a Slack Channel to Flue'));
 		assert.ok(result.stdout.includes('export const channel'));
 		assert.ok(result.stdout.includes('export const client'));
 		assert.ok(result.stdout.includes('@slack/web-api@^8.0.0-rc.1'));
+		assert.ok(result.stdout.includes('async events({ payload })'));
+		assert.ok(result.stdout.includes('switch (payload.event.type)'));
+		assert.ok(result.stdout.includes('async commands({ c, payload })'));
 		assert.ok(result.stdout.includes('/channels/slack/commands'));
+		assert.ok(!result.stdout.includes('async events({ event })'));
 		assert.ok(!result.stdout.startsWith('---'));
 	});
 

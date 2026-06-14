@@ -1159,6 +1159,118 @@ Focused review:
 - Aligned new active-suite test names with repository conventions.
 - No unresolved correctness findings remain.
 
+#### Native-payload implementation follow-up — 2026-06-13
+
+Status:
+
+- Complete.
+
+Implemented:
+
+- Replaced Flue's normalized Slack Events API model with the provider-native
+  outer delivery envelope and the official `@slack/types@3.0.0-rc.1`
+  `SlackEvent` union, re-exported from `@flue/slack`.
+- Changed callbacks to `events({ c, payload })`,
+  `interactions({ c, payload })`, and `commands({ c, payload })`.
+- Removed event normalization, camel-cased mirrors, retry normalization,
+  interaction capability wrappers, and bot/message-subtype filtering.
+- Preserved Slack JSON and form field names and nesting. Added narrow local
+  wire types for interaction and command surfaces because no lightweight
+  authoritative package exposes those complete callback payloads.
+- Kept URL verification internal. Other authenticated event deliveries,
+  including bot messages, message subtypes, Assistant events, rate-limit
+  notifications, and unmodeled nested event discriminants, reach application
+  code.
+- Kept retry metadata in the authentic Hono request headers rather than
+  copying it into a Flue event model.
+- Updated the editable example, package README, connector recipe, API
+  reference, ecosystem guide, and foundational Channels guide. Outbound reply,
+  Assistant status, and streaming examples are explicitly Slack Web API SDK
+  capabilities rather than Flue channel features.
+
+Tests:
+
+- Replaced normalized-event assertions with native payload pass-through
+  coverage for Events API envelopes, official Assistant-event narrowing, bot
+  messages, message subtypes, reactions, future event discriminants,
+  `app_rate_limited`, multi-action interactions, future interaction types, and
+  snake_case slash-command forms.
+- Retained and expanded signature, replay window, identity, org-install,
+  malformed transport, body limit, response, timeout, optional route, and
+  conversation-key behavior.
+- Workerd executes exact-byte verification and native Events API, shortcut,
+  and command callbacks.
+- The editable example executes `chat.postMessage`,
+  `assistant.threads.setStatus`, and `chatStream()` start/append/stop requests
+  through fake Fetch responses in workerd without contacting Slack.
+- The real `flue add` suite now asserts that the Slack recipe teaches the
+  provider-native callback contract.
+
+Validation:
+
+- `@flue/slack` build, strict typecheck, 21 Node tests, and 2 workerd tests
+  pass.
+- The Slack example strict typecheck, 3 real-client workerd tests, Node build,
+  and Cloudflare build pass. The Cloudflare build reports only the example's
+  existing missing Durable Object migration warning.
+- A generated Node server returns the documented URL-verification challenge
+  for a valid original signed request and `401` for the same signature over
+  tampered bytes.
+- Documentation check and production build pass.
+- `scripts/prepare-publish.mjs` completes successfully.
+- The packed package contains the expected runtime, declarations, README,
+  license, and prepared docs. Its package metadata includes direct
+  `@slack/types` and Hono dependencies and no outbound SDK.
+- A clean offline strict TypeScript consumer installs the tarball, compiles a
+  custom Hono environment, narrows official Assistant and message events,
+  consumes interaction and command types, and imports the constructor at
+  runtime.
+
+Deviation and foundation improvement:
+
+- The generated Node smoke test found that the built Flue server rejected a
+  valid channel `Response` created by the external package because
+  `instanceof Response` is realm-sensitive across the bundle/package
+  boundary. This was new evidence not captured by the plan.
+- Replaced that shared runtime assertion with a Fetch response brand check and
+  added a routing regression test. Applied the same realm-safe check to
+  Slack's callback result serializer so Hono or Fetch responses from the
+  application are not rejected across the same boundary.
+- This is a concrete shared channel-foundation correction, not a Slack
+  abstraction. No broader payload or routing machinery changed.
+
+Clean-room affirmation:
+
+- The implementation, local wire types, synthetic payloads, and assertions
+  were derived from Slack's official protocol/type surfaces and existing Flue
+  contracts. No Chat SDK implementation, types, tests, fixtures, or submitted
+  PR code were copied or translated.
+
+Independent review:
+
+- One read-only subagent reviewed correctness, security, provider-native
+  semantics, TypeScript DX, Node/Cloudflare behavior, and documentation
+  consistency without spawning subagents.
+- The reviewer correctly identified that accepting a cross-realm response by
+  tag and shape alone could pass a spoofed object downstream. The final
+  implementation now validates the response metadata and normalizes foreign
+  responses into a new local Fetch `Response`; bare tagged objects are rejected
+  in both shared routing and Slack callback serialization.
+- The reviewer also identified current official Bolt interaction families that
+  were missing from the local wire union. Added legacy interactive-message
+  actions and suggestions, dialog submissions and suggestions, and deprecated
+  workflow-step edit payloads, plus narrowing/pass-through coverage for dialog
+  submissions.
+- The broader observation that future provider discriminants can exceed an
+  installed closed TypeScript union is retained as an intentional policy
+  tradeoff. Flue forwards authenticated future payloads rather than filtering
+  them or inventing a custom `unknown` discriminant. The API reference states
+  this runtime behavior; users update provider/channel types for new
+  discriminants.
+- After the fixes, package tests, workerd tests, all 659 runtime tests, example
+  tests/builds, docs checks/build, connector tests, built-server smoke,
+  prepared artifacts, packed tarball, and clean strict consumer pass.
+
 Deviations:
 
 - None.

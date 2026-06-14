@@ -1,3 +1,4 @@
+import type { SlackEvent } from '@slack/types';
 import type { Context, Env, Handler } from 'hono';
 import { InvalidSlackConversationKeyError, InvalidSlackInputError } from './errors.ts';
 import {
@@ -7,6 +8,7 @@ import {
 } from './routes.ts';
 
 export { InvalidSlackConversationKeyError, InvalidSlackInputError } from './errors.ts';
+export type { SlackEvent };
 
 export type JsonValue =
 	| null
@@ -26,7 +28,7 @@ export interface ChannelRoute<E extends Env = Env> {
 export interface SlackChannelOptions<E extends Env = Env> {
 	/** Secret used to verify exact Slack request bytes. */
 	signingSecret: string;
-	/** Expected application id. Normalized payloads always use this value. */
+	/** Expected application id. */
 	appId: string;
 	/** Expected workspace id. Org-wide installations are not supported in v1. */
 	teamId: string;
@@ -34,11 +36,11 @@ export interface SlackChannelOptions<E extends Env = Env> {
 	bodyLimit?: number;
 	/** Handler deadline in milliseconds. Defaults to and may not exceed 2500. */
 	handlerTimeoutMs?: number;
-	/** Optional Events API callback. Omit it to omit `/events`. */
+	/** Receives provider-native Events API payloads. Omit it to omit `/events`. */
 	events?(input: SlackEventsHandlerInput<E>): SlackHandlerResult;
-	/** Optional interactivity callback. Omit it to omit `/interactions`. */
+	/** Receives provider-native interactivity payloads. Omit it to omit `/interactions`. */
 	interactions?(input: SlackInteractionsHandlerInput<E>): SlackHandlerResult;
-	/** Optional slash-command callback. Omit it to omit `/commands`. */
+	/** Receives provider-native slash-command fields. Omit it to omit `/commands`. */
 	commands?(input: SlackCommandsHandlerInput<E>): SlackHandlerResult;
 }
 
@@ -49,216 +51,283 @@ export interface SlackThreadRef {
 	threadTs: string;
 }
 
-export interface SlackAppMentionPayload {
-	channelId: string;
-	messageTs: string;
-	threadTs?: string;
-	text: string;
-	userId: string;
+export interface SlackAuthorization {
+	enterprise_id: string | null;
+	team_id: string | null;
+	user_id: string;
+	is_bot: boolean;
+	is_enterprise_install?: boolean;
 }
 
-export interface SlackMessagePayload {
-	channelId: string;
-	messageTs: string;
-	threadTs?: string;
-	text: string;
-	userId: string;
+/** Provider-native Events API callback envelope. */
+export interface SlackEventCallbackPayload {
+	token: string;
+	team_id: string;
+	enterprise_id?: string | null;
+	context_team_id?: string;
+	context_enterprise_id?: string | null;
+	api_app_id: string;
+	event: SlackEvent;
+	type: 'event_callback';
+	event_id: string;
+	event_time: number;
+	event_context?: string;
+	is_ext_shared_channel?: boolean;
+	authorizations?: SlackAuthorization[];
 }
 
-export interface SlackEventEnvelope<TType extends string, TPayload> {
-	type: TType;
-	eventId: string;
-	appId: string;
-	teamId: string;
-	retry?: { number: number; reason?: string };
-	payload: TPayload;
-	/** Parsed provider payload. Treat this as untrusted provider data. */
-	raw: unknown;
+/** Provider-native rate-limit notification sent to the Events API endpoint. */
+export type SlackAppRateLimitedPayload = Extract<SlackEvent, { type: 'app_rate_limited' }>;
+
+/** Provider-native payload delivered to the Events API callback. */
+export type SlackEventsApiPayload = SlackEventCallbackPayload | SlackAppRateLimitedPayload;
+
+export interface SlackTeam {
+	id: string;
+	domain?: string;
+	enterprise_id?: string;
+	enterprise_name?: string;
 }
 
-export interface SlackUnknownEvent {
-	type: 'unknown';
-	eventType: string;
-	/** Slack event id when the unsupported envelope supplies one. */
-	eventId?: string;
-	appId: string;
-	teamId: string;
-	retry?: { number: number; reason?: string };
-	raw: unknown;
+export interface SlackUser {
+	id: string;
+	name?: string;
+	username?: string;
+	team_id?: string;
+}
+
+export interface SlackEnterprise {
+	id: string;
+	name?: string;
+}
+
+export interface SlackBlockAction {
+	type: string;
+	action_id: string;
+	block_id?: string;
+	action_ts?: string;
+	value?: string;
+	[key: string]: unknown;
+}
+
+export interface SlackBlockActionsPayload {
+	type: 'block_actions';
+	actions: SlackBlockAction[];
+	team: SlackTeam | null;
+	user: SlackUser;
+	api_app_id: string;
+	token?: string;
+	trigger_id?: string;
+	response_url?: string;
+	container: Record<string, unknown>;
+	channel?: Record<string, unknown>;
+	message?: Record<string, unknown>;
+	view?: Record<string, unknown>;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackViewSubmissionPayload {
+	type: 'view_submission';
+	team: SlackTeam | null;
+	user: SlackUser;
+	view: Record<string, unknown>;
+	api_app_id: string;
+	token?: string;
+	trigger_id?: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	response_urls?: Array<{
+		block_id: string;
+		action_id: string;
+		channel_id: string;
+		response_url: string;
+	}>;
+	[key: string]: unknown;
+}
+
+export interface SlackViewClosedPayload {
+	type: 'view_closed';
+	team: SlackTeam | null;
+	user: SlackUser;
+	view: Record<string, unknown>;
+	api_app_id: string;
+	token?: string;
+	is_cleared: boolean;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackShortcutPayload {
+	type: 'shortcut';
+	callback_id: string;
+	trigger_id: string;
+	user: SlackUser;
+	team: SlackTeam | null;
+	api_app_id?: string;
+	token?: string;
+	action_ts?: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackMessageActionPayload {
+	type: 'message_action';
+	callback_id: string;
+	trigger_id: string;
+	message_ts: string;
+	response_url: string;
+	message: Record<string, unknown>;
+	user: SlackUser;
+	channel: Record<string, unknown>;
+	team: SlackTeam | null;
+	api_app_id?: string;
+	token?: string;
+	action_ts?: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackBlockSuggestionPayload {
+	type: 'block_suggestion';
+	action_id: string;
+	block_id: string;
+	value: string;
+	team: SlackTeam | null;
+	user: SlackUser;
+	api_app_id?: string;
+	channel?: Record<string, unknown>;
+	view?: Record<string, unknown>;
+	token?: string;
+	[key: string]: unknown;
+}
+
+export interface SlackInteractiveMessagePayload {
+	type: 'interactive_message';
+	callback_id: string;
+	actions: Array<Record<string, unknown> & { type: string; name: string }>;
+	team: SlackTeam | null;
+	user: SlackUser;
+	channel: Record<string, unknown>;
+	action_ts: string;
+	token: string;
+	response_url: string;
+	trigger_id: string;
+	attachment_id?: string;
+	message_ts?: string;
+	original_message?: Record<string, unknown>;
+	is_app_unfurl?: boolean;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackInteractiveMessageSuggestionPayload {
+	type: 'interactive_message';
+	name: string;
+	value: string;
+	callback_id: string;
+	action_ts: string;
+	message_ts: string;
+	attachment_id: string;
+	team: SlackTeam | null;
+	user: SlackUser;
+	channel?: Record<string, unknown>;
+	token: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackDialogSubmissionPayload {
+	type: 'dialog_submission';
+	callback_id: string;
+	submission: Record<string, string>;
+	state: string;
+	team: SlackTeam | null;
+	user: SlackUser;
+	channel: Record<string, unknown>;
+	action_ts: string;
+	token: string;
+	response_url: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+export interface SlackDialogSuggestionPayload {
+	type: 'dialog_suggestion';
+	name: string;
+	value: string;
+	callback_id: string;
+	action_ts: string;
+	team: SlackTeam | null;
+	user: SlackUser;
+	channel?: Record<string, unknown>;
+	token: string;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
+}
+
+/** @deprecated Slack no longer supports Steps from Apps. */
+export interface SlackWorkflowStepEditPayload {
+	type: 'workflow_step_edit';
+	callback_id: string;
+	trigger_id: string;
+	user: SlackUser;
+	team: SlackTeam;
+	channel?: Record<string, unknown>;
+	token: string;
+	action_ts: string;
+	workflow_step: Record<string, unknown>;
+	is_enterprise_install?: boolean;
+	enterprise?: SlackEnterprise;
+	[key: string]: unknown;
 }
 
 /**
- * Short-lived Slack capabilities for immediate trusted application use.
+ * Provider-native JSON payload delivered to the interactivity callback.
  *
- * Never place these values in model context, dispatch input, logs, or durable
- * session data.
+ * The current union covers Slack's documented HTTP interaction families.
+ * Authenticated future interaction types are still forwarded at runtime.
  */
-export interface SlackInteractionCapabilities {
-	triggerId?: string;
-	responseUrl?: string;
-	responseUrls?: readonly {
-		blockId: string;
-		actionId: string;
-		channelId: string;
-		responseUrl: string;
-	}[];
-}
+export type SlackInteractionPayload =
+	| SlackBlockActionsPayload
+	| SlackViewSubmissionPayload
+	| SlackViewClosedPayload
+	| SlackShortcutPayload
+	| SlackMessageActionPayload
+	| SlackBlockSuggestionPayload
+	| SlackInteractiveMessagePayload
+	| SlackInteractiveMessageSuggestionPayload
+	| SlackDialogSubmissionPayload
+	| SlackDialogSuggestionPayload
+	| SlackWorkflowStepEditPayload;
 
-/** Provider container that originated a block action. */
-export interface SlackInteractionContainer {
-	type: string;
-	channelId?: string;
-	messageTs?: string;
-	viewId?: string;
-}
-
-/** One verified Block Kit action. Message context is present only when supplied. */
-export interface SlackActionEnvelope {
-	type: 'action';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	actionId: string;
-	/** Signed action value when the provider action supplies one. */
-	value?: string;
-	blockId?: string;
-	container: SlackInteractionContainer;
-	channelId?: string;
-	messageTs?: string;
-	threadTs?: string;
-	capabilities?: SlackInteractionCapabilities;
-	/** Provider-native action object. */
-	payload: unknown;
-	/**
-	 * Complete parsed interaction payload. It may contain a signed
-	 * `response_url` capability; keep it out of dispatch input, model context,
-	 * logs, and durable session data.
-	 */
-	raw: unknown;
-}
-
-/** One verified modal submission. */
-export interface SlackViewSubmissionEnvelope {
-	type: 'view_submission';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	viewId: string;
-	callbackId: string;
-	privateMetadata?: string;
-	values: unknown;
-	capabilities?: SlackInteractionCapabilities;
-	/**
-	 * Complete parsed interaction payload. It may contain a signed
-	 * `response_url` capability; keep it out of dispatch input, model context,
-	 * logs, and durable session data.
-	 */
-	raw: unknown;
-}
-
-/** One verified modal closure. */
-export interface SlackViewClosedEnvelope {
-	type: 'view_closed';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	viewId: string;
-	callbackId?: string;
-	privateMetadata?: string;
-	isCleared: boolean;
-	raw: unknown;
-}
-
-/** One verified global shortcut invocation. */
-export interface SlackShortcutEnvelope {
-	type: 'shortcut';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	callbackId: string;
-	capabilities: SlackInteractionCapabilities & { triggerId: string };
-	raw: unknown;
-}
-
-/** One verified message shortcut invocation. */
-export interface SlackMessageShortcutEnvelope {
-	type: 'message_action';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	callbackId: string;
-	channelId: string;
-	messageTs: string;
-	message: unknown;
-	capabilities: SlackInteractionCapabilities & { triggerId: string; responseUrl: string };
-	raw: unknown;
-}
-
-/** One verified external-select suggestion request. */
-export interface SlackBlockSuggestionEnvelope {
-	type: 'block_suggestion';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	actionId: string;
-	blockId: string;
-	value: string;
-	channelId?: string;
-	viewId?: string;
-	raw: unknown;
-}
-
-/** Verified but unsupported Slack interaction. */
-export interface SlackUnknownInteraction {
-	type: 'unknown';
-	interactionType: string;
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-	capabilities?: SlackInteractionCapabilities;
-	raw: unknown;
-}
-
-/** One verified slash-command invocation. */
-export interface SlackSlashCommand {
-	type: 'slash_command';
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	channelId: string;
-	channelName?: string;
-	userId: string;
-	userName?: string;
+/** Provider-native URL-encoded slash-command payload. */
+export interface SlackSlashCommandPayload {
+	token?: string;
 	command: string;
 	text: string;
-	capabilities: SlackInteractionCapabilities & {
-		triggerId: string;
-		responseUrl: string;
-	};
-	raw: unknown;
+	response_url: string;
+	trigger_id: string;
+	user_id: string;
+	user_name?: string;
+	team_id: string;
+	team_domain?: string;
+	channel_id: string;
+	channel_name?: string;
+	api_app_id: string;
+	enterprise_id?: string;
+	enterprise_name?: string;
+	is_enterprise_install?: string;
+	[key: string]: unknown;
 }
-
-export interface SlackEvents {
-	app_mention: SlackEventEnvelope<'app_mention', SlackAppMentionPayload>;
-	message: SlackEventEnvelope<'message', SlackMessagePayload>;
-}
-
-export type SlackEvent = SlackEvents[keyof SlackEvents] | SlackUnknownEvent;
-export type SlackInteraction =
-	| SlackActionEnvelope
-	| SlackViewSubmissionEnvelope
-	| SlackViewClosedEnvelope
-	| SlackShortcutEnvelope
-	| SlackMessageShortcutEnvelope
-	| SlackBlockSuggestionEnvelope
-	| SlackUnknownInteraction;
 
 /** Provider-native Slack view validation response. */
 export interface SlackViewValidationResponse {
@@ -268,21 +337,28 @@ export interface SlackViewValidationResponse {
 
 type SlackHandlerValue = undefined | JsonValue | SlackViewValidationResponse | Response;
 
+/**
+ * Returning nothing produces an empty `200`. JSON-compatible values become
+ * JSON responses, and Hono or Fetch responses pass through unchanged.
+ */
 export type SlackHandlerResult = SlackHandlerValue | Promise<SlackHandlerValue>;
 
+/** Input for the optional Events API route. */
 export interface SlackEventsHandlerInput<E extends Env = Env> {
 	c: Context<E>;
-	event: SlackEvent;
+	payload: SlackEventsApiPayload;
 }
 
+/** Input for the optional interactivity route. */
 export interface SlackInteractionsHandlerInput<E extends Env = Env> {
 	c: Context<E>;
-	interaction: SlackInteraction;
+	payload: SlackInteractionPayload;
 }
 
+/** Input for the optional slash-command route. */
 export interface SlackCommandsHandlerInput<E extends Env = Env> {
 	c: Context<E>;
-	command: SlackSlashCommand;
+	payload: SlackSlashCommandPayload;
 }
 
 /** Verified ingress and canonical identity helpers. */
@@ -298,8 +374,10 @@ export interface SlackChannel<E extends Env = Env> {
  * Creates a fixed-workspace Slack channel.
  *
  * Signed request timestamps must be within five minutes of the server clock.
- * Successful acknowledgement waits for the configured handler, and the
- * channel does not deduplicate Events API retries.
+ * URL verification is handled internally. Other authenticated deliveries are
+ * forwarded with Slack's field names and nesting. Successful acknowledgement
+ * waits for the configured handler, and the channel does not deduplicate
+ * Events API retries.
  */
 export function createSlackChannel<E extends Env = Env>(
 	options: SlackChannelOptions<E>,

@@ -1,20 +1,10 @@
 import type { Context, Env, Handler } from 'hono';
 import type {
 	JsonValue,
-	SlackActionEnvelope,
-	SlackBlockSuggestionEnvelope,
-	SlackEvent,
-	SlackEvents,
+	SlackEventsApiPayload,
 	SlackHandlerResult,
-	SlackInteraction,
-	SlackInteractionCapabilities,
-	SlackMessageShortcutEnvelope,
-	SlackShortcutEnvelope,
-	SlackSlashCommand,
-	SlackUnknownEvent,
-	SlackUnknownInteraction,
-	SlackViewClosedEnvelope,
-	SlackViewSubmissionEnvelope,
+	SlackInteractionPayload,
+	SlackSlashCommandPayload,
 } from './index.ts';
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
@@ -31,15 +21,15 @@ interface SharedRouteOptions {
 }
 
 interface SlackEventsHandlerOptions<E extends Env> extends SharedRouteOptions {
-	events(input: { c: Context<E>; event: SlackEvent }): SlackHandlerResult;
+	events(input: { c: Context<E>; payload: SlackEventsApiPayload }): SlackHandlerResult;
 }
 
 interface SlackInteractionsHandlerOptions<E extends Env> extends SharedRouteOptions {
-	interactions(input: { c: Context<E>; interaction: SlackInteraction }): SlackHandlerResult;
+	interactions(input: { c: Context<E>; payload: SlackInteractionPayload }): SlackHandlerResult;
 }
 
 interface SlackCommandsHandlerOptions<E extends Env> extends SharedRouteOptions {
-	commands(input: { c: Context<E>; command: SlackSlashCommand }): SlackHandlerResult;
+	commands(input: { c: Context<E>; payload: SlackSlashCommandPayload }): SlackHandlerResult;
 }
 
 export function createSlackEventsHandler<E extends Env>(
@@ -60,59 +50,22 @@ export function createSlackEventsHandler<E extends Env>(
 			if (challenge === undefined) return response(400);
 			return Response.json({ challenge }, { status: 200 });
 		}
-		if (envelopeType !== 'event_callback') {
-			const appId = readString(raw, 'api_app_id');
-			const teamId = readString(raw, 'team_id');
-			if (!appId || !teamId) return response(400);
-			if (appId !== options.appId || teamId !== options.teamId) return response(403);
-			if (isEnterpriseInstall(raw)) return response(403);
-			const eventId = readOptionalString(raw, 'event_id');
-			return invokeEvent(
-				options.events,
-				c,
-				{
-					type: 'unknown',
-					eventType: envelopeType ?? 'unknown',
-					...(eventId === undefined ? {} : { eventId }),
-					appId,
-					teamId,
-					retry: readRetry(request.headers),
-					raw,
-				},
-				route.handlerTimeoutMs,
-			);
-		}
-
 		const appId = readString(raw, 'api_app_id');
 		const teamId = readString(raw, 'team_id');
-		const eventId = readString(raw, 'event_id');
-		const event = readRecord(raw, 'event');
-		if (!appId || !teamId || !eventId || !event) return response(400);
+		if (!envelopeType || !appId || !teamId) return response(400);
 		if (appId !== options.appId || teamId !== options.teamId) return response(403);
 		if (isEnterpriseInstall(raw)) return response(403);
 
-		const eventType = readString(event, 'type');
-		if (
-			eventType === 'message' &&
-			(Object.hasOwn(event, 'subtype') || Object.hasOwn(event, 'bot_id'))
-		) {
-			return response(200);
+		if (envelopeType === 'event_callback') {
+			const eventId = readString(raw, 'event_id');
+			const event = readRecord(raw, 'event');
+			if (!eventId || !event || !readString(event, 'type')) return response(400);
 		}
 
-		const normalized =
-			eventType === 'app_mention' || eventType === 'message'
-				? normalizeEvent(eventType, raw, event, request.headers)
-				: ({
-						type: 'unknown',
-						eventType: eventType ?? 'unknown',
-						eventId,
-						appId,
-						teamId,
-						retry: readRetry(request.headers),
-						raw,
-					} satisfies SlackUnknownEvent);
-		if (!normalized) return response(400);
-		return invokeEvent(options.events, c, normalized, route.handlerTimeoutMs);
+		return invokeHandler(
+			() => options.events({ c, payload: raw as unknown as SlackEventsApiPayload }),
+			route.handlerTimeoutMs,
+		);
 	};
 }
 
@@ -128,49 +81,20 @@ export function createSlackInteractionsHandler<E extends Env>(
 		const raw = parseFormPayload(verified.body);
 		if (!isRecord(raw)) return response(400);
 
-		const payloadAppId = readOptionalString(raw, 'api_app_id');
+		const payloadAppId = raw.api_app_id;
+		if (payloadAppId !== undefined && typeof payloadAppId !== 'string') return response(400);
 		const team = readRecord(raw, 'team');
 		const teamId = team && readString(team, 'id');
-		const enterprise = readRecord(raw, 'enterprise');
-		const enterpriseId = enterprise && readOptionalString(enterprise, 'id');
 		const user = readRecord(raw, 'user');
 		const userId = user && readString(user, 'id');
-		if (!teamId || !userId) return response(403);
-		if (payloadAppId !== undefined && payloadAppId !== options.appId) return response(403);
-		if (teamId !== options.teamId || isEnterpriseInstall(raw)) return response(403);
-		const common = {
-			appId: options.appId,
-			teamId,
-			...(enterpriseId === undefined ? {} : { enterpriseId }),
-			userId,
-		};
-
 		const type = readString(raw, 'type');
-		let interaction: SlackInteraction | undefined;
-		if (type === 'block_actions') {
-			interaction = normalizeAction(raw, common);
-		} else if (type === 'view_submission') {
-			interaction = normalizeView(raw, common);
-		} else if (type === 'view_closed') {
-			interaction = normalizeViewClosed(raw, common);
-		} else if (type === 'shortcut') {
-			interaction = normalizeShortcut(raw, common);
-		} else if (type === 'message_action') {
-			interaction = normalizeMessageShortcut(raw, common);
-		} else if (type === 'block_suggestion') {
-			interaction = normalizeBlockSuggestion(raw, common);
-		} else {
-			const capabilities = readInteractionCapabilities(raw);
-			interaction = {
-				type: 'unknown',
-				interactionType: type ?? 'unknown',
-				...common,
-				...(capabilities === undefined ? {} : { capabilities }),
-				raw,
-			} satisfies SlackUnknownInteraction;
-		}
-		if (!interaction) return response(400);
-		return invokeInteraction(options.interactions, c, interaction, route.handlerTimeoutMs);
+		if (!type || !teamId || !userId) return response(400);
+		if (typeof payloadAppId === 'string' && payloadAppId !== options.appId) return response(403);
+		if (teamId !== options.teamId || isEnterpriseInstall(raw)) return response(403);
+		return invokeHandler(
+			() => options.interactions({ c, payload: raw as unknown as SlackInteractionPayload }),
+			route.handlerTimeoutMs,
+		);
 	};
 }
 
@@ -212,47 +136,22 @@ export function createSlackCommandsHandler<E extends Env>(
 			return response(403);
 		}
 
-		const enterpriseId = readOptionalFormValue(form, 'enterprise_id');
-		const channelName = readOptionalFormValue(form, 'channel_name');
-		const userName = readOptionalFormValue(form, 'user_name');
-		const command: SlackSlashCommand = {
-			type: 'slash_command',
-			appId,
-			teamId,
-			...(enterpriseId === undefined ? {} : { enterpriseId }),
-			channelId,
-			...(channelName === undefined ? {} : { channelName }),
-			userId,
-			...(userName === undefined ? {} : { userName }),
-			command: commandName,
-			text,
-			capabilities: { triggerId, responseUrl },
-			raw: formToRecord(form),
-		};
-		const outcome = await runHandler(() => options.commands({ c, command }), route.handlerTimeoutMs);
-		if (outcome.type !== 'success') return response(500);
-		return serializeHandlerResult(outcome.value);
+		return invokeHandler(
+			() =>
+				options.commands({
+					c,
+					payload: formToRecord(form) as unknown as SlackSlashCommandPayload,
+				}),
+			route.handlerTimeoutMs,
+		);
 	};
 }
 
-async function invokeEvent<E extends Env>(
-	handler: (input: { c: Context<E>; event: SlackEvent }) => SlackHandlerResult,
-	c: Context<E>,
-	event: SlackEvent,
+async function invokeHandler(
+	handler: () => SlackHandlerResult,
 	timeoutMs: number,
 ): Promise<Response> {
-	const outcome = await runHandler(() => handler({ c, event }), timeoutMs);
-	if (outcome.type !== 'success') return response(500);
-	return serializeHandlerResult(outcome.value);
-}
-
-async function invokeInteraction<E extends Env>(
-	handler: (input: { c: Context<E>; interaction: SlackInteraction }) => SlackHandlerResult,
-	c: Context<E>,
-	interaction: SlackInteraction,
-	timeoutMs: number,
-): Promise<Response> {
-	const outcome = await runHandler(() => handler({ c, interaction }), timeoutMs);
+	const outcome = await runHandler(handler, timeoutMs);
 	if (outcome.type !== 'success') return response(500);
 	return serializeHandlerResult(outcome.value);
 }
@@ -311,243 +210,6 @@ function prepareRoute(options: SharedRouteOptions): {
 	};
 }
 
-function normalizeEvent(
-	type: keyof SlackEvents,
-	raw: Record<string, unknown>,
-	event: Record<string, unknown>,
-	headers: Headers,
-): SlackEvents[keyof SlackEvents] | undefined {
-	const appId = readString(raw, 'api_app_id');
-	const teamId = readString(raw, 'team_id');
-	const eventId = readString(raw, 'event_id');
-	const channelId = readString(event, 'channel');
-	const messageTs = readString(event, 'ts');
-	const threadTs = readOptionalString(event, 'thread_ts');
-	const text = readString(event, 'text');
-	const userId = readString(event, 'user');
-	if (!appId || !teamId || !eventId || !channelId || !messageTs || text === undefined || !userId) {
-		return undefined;
-	}
-	const common = {
-		type,
-		eventId,
-		appId,
-		teamId,
-		retry: readRetry(headers),
-		raw,
-	};
-	return {
-		...common,
-		type,
-		payload: { channelId, messageTs, threadTs, text, userId },
-	};
-}
-
-interface SlackInteractionIdentity {
-	appId: string;
-	teamId: string;
-	enterpriseId?: string;
-	userId: string;
-}
-
-function normalizeAction(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackActionEnvelope | undefined {
-	const actions = raw.actions;
-	if (!Array.isArray(actions) || actions.length !== 1 || !isRecord(actions[0])) return undefined;
-	const action = actions[0];
-	const actionId = readString(action, 'action_id');
-	if (!actionId) return undefined;
-	const value = readOptionalString(action, 'value');
-	const blockId = readOptionalString(action, 'block_id');
-	const channel = readRecord(raw, 'channel');
-	const message = readRecord(raw, 'message');
-	const container = readRecord(raw, 'container');
-	const containerType = container && readString(container, 'type');
-	if (!container || !containerType) return undefined;
-	const channelId =
-		(channel && readOptionalString(channel, 'id')) ?? readOptionalString(container, 'channel_id');
-	const messageTs =
-		(message && readOptionalString(message, 'ts')) ?? readOptionalString(container, 'message_ts');
-	const threadTs =
-		(message && readOptionalString(message, 'thread_ts')) ??
-		readOptionalString(container, 'thread_ts') ??
-		messageTs;
-	const viewId = readOptionalString(container, 'view_id');
-	const capabilities = readInteractionCapabilities(raw);
-	return {
-		type: 'action',
-		...identity,
-		actionId,
-		...(value === undefined ? {} : { value }),
-		...(blockId === undefined ? {} : { blockId }),
-		container: {
-			type: containerType,
-			...(channelId === undefined ? {} : { channelId }),
-			...(messageTs === undefined ? {} : { messageTs }),
-			...(viewId === undefined ? {} : { viewId }),
-		},
-		...(channelId === undefined ? {} : { channelId }),
-		...(messageTs === undefined ? {} : { messageTs }),
-		...(threadTs === undefined ? {} : { threadTs }),
-		...(capabilities === undefined ? {} : { capabilities }),
-		payload: action,
-		raw,
-	};
-}
-
-function normalizeView(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackViewSubmissionEnvelope | undefined {
-	const view = readRecord(raw, 'view');
-	const viewId = view && readString(view, 'id');
-	const callbackId = view && readString(view, 'callback_id');
-	const state = view && readRecord(view, 'state');
-	if (!viewId || !callbackId || !state || !Object.hasOwn(state, 'values')) return undefined;
-	const capabilities = readInteractionCapabilities(raw);
-	return {
-		type: 'view_submission',
-		...identity,
-		viewId,
-		callbackId,
-		privateMetadata: readOptionalString(view, 'private_metadata'),
-		values: state.values,
-		...(capabilities === undefined ? {} : { capabilities }),
-		raw,
-	};
-}
-
-function normalizeViewClosed(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackViewClosedEnvelope | undefined {
-	const view = readRecord(raw, 'view');
-	const viewId = view && readString(view, 'id');
-	const isCleared = raw.is_cleared;
-	if (!viewId || typeof isCleared !== 'boolean') return undefined;
-	const callbackId = readOptionalString(view, 'callback_id');
-	const privateMetadata = readOptionalString(view, 'private_metadata');
-	return {
-		type: 'view_closed',
-		...identity,
-		viewId,
-		...(callbackId === undefined ? {} : { callbackId }),
-		...(privateMetadata === undefined ? {} : { privateMetadata }),
-		isCleared,
-		raw,
-	};
-}
-
-function normalizeShortcut(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackShortcutEnvelope | undefined {
-	const callbackId = readString(raw, 'callback_id');
-	const triggerId = readString(raw, 'trigger_id');
-	if (!callbackId || !triggerId) return undefined;
-	return {
-		type: 'shortcut',
-		...identity,
-		callbackId,
-		capabilities: {
-			...readInteractionCapabilities(raw),
-			triggerId,
-		},
-		raw,
-	};
-}
-
-function normalizeMessageShortcut(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackMessageShortcutEnvelope | undefined {
-	const callbackId = readString(raw, 'callback_id');
-	const triggerId = readString(raw, 'trigger_id');
-	const responseUrl = readString(raw, 'response_url');
-	const channel = readRecord(raw, 'channel');
-	const channelId = channel && readString(channel, 'id');
-	const message = readRecord(raw, 'message');
-	const messageTs = message && readString(message, 'ts');
-	if (!callbackId || !triggerId || !responseUrl || !channelId || !message || !messageTs) {
-		return undefined;
-	}
-	return {
-		type: 'message_action',
-		...identity,
-		callbackId,
-		channelId,
-		messageTs,
-		message,
-		capabilities: {
-			...readInteractionCapabilities(raw),
-			triggerId,
-			responseUrl,
-		},
-		raw,
-	};
-}
-
-function normalizeBlockSuggestion(
-	raw: Record<string, unknown>,
-	identity: SlackInteractionIdentity,
-): SlackBlockSuggestionEnvelope | undefined {
-	const actionId = readString(raw, 'action_id');
-	const blockId = readString(raw, 'block_id');
-	const value = readString(raw, 'value');
-	if (!actionId || !blockId || value === undefined) return undefined;
-	const channel = readRecord(raw, 'channel');
-	const channelId = channel && readOptionalString(channel, 'id');
-	const view = readRecord(raw, 'view');
-	const viewId = view && readOptionalString(view, 'id');
-	return {
-		type: 'block_suggestion',
-		...identity,
-		actionId,
-		blockId,
-		value,
-		...(channelId === undefined ? {} : { channelId }),
-		...(viewId === undefined ? {} : { viewId }),
-		raw,
-	};
-}
-
-function readInteractionCapabilities(
-	raw: Record<string, unknown>,
-): SlackInteractionCapabilities | undefined {
-	const triggerId = readOptionalString(raw, 'trigger_id');
-	const responseUrl = readOptionalString(raw, 'response_url');
-	const view = readRecord(raw, 'view');
-	const responseUrls = view && readResponseUrls(view.response_urls);
-	if (triggerId === undefined && responseUrl === undefined && responseUrls === undefined) {
-		return undefined;
-	}
-	return {
-		...(triggerId === undefined ? {} : { triggerId }),
-		...(responseUrl === undefined ? {} : { responseUrl }),
-		...(responseUrls === undefined ? {} : { responseUrls }),
-	};
-}
-
-function readResponseUrls(
-	value: unknown,
-): SlackInteractionCapabilities['responseUrls'] | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const responseUrls: NonNullable<SlackInteractionCapabilities['responseUrls']>[number][] = [];
-	for (const item of value) {
-		if (!isRecord(item)) continue;
-		const blockId = readString(item, 'block_id');
-		const actionId = readString(item, 'action_id');
-		const channelId = readString(item, 'channel_id');
-		const responseUrl = readString(item, 'response_url');
-		if (blockId && actionId && channelId && responseUrl) {
-			responseUrls.push({ blockId, actionId, channelId, responseUrl });
-		}
-	}
-	return responseUrls.length > 0 ? responseUrls : undefined;
-}
-
 function isEnterpriseInstall(raw: Record<string, unknown>): boolean {
 	if (raw.is_enterprise_install === true) return true;
 	if (!Array.isArray(raw.authorizations)) return false;
@@ -578,10 +240,38 @@ async function runHandler<T>(
 }
 
 function serializeHandlerResult(value: unknown): Response {
-	if (value instanceof Response) return value;
+	const fetchResponse = normalizeFetchResponse(value);
+	if (fetchResponse) return fetchResponse;
+	if (Object.prototype.toString.call(value) === '[object Response]') return response(500);
 	if (value === undefined) return response(200);
 	if (!isJsonValue(value)) return response(500);
 	return Response.json(value);
+}
+
+function normalizeFetchResponse(value: unknown): Response | undefined {
+	if (value instanceof globalThis.Response) return value;
+	if (Object.prototype.toString.call(value) !== '[object Response]') return undefined;
+	if (typeof value !== 'object' || value === null) return undefined;
+	try {
+		const response = value as Response;
+		if (
+			!Number.isInteger(response.status) ||
+			response.status < 200 ||
+			response.status > 599 ||
+			typeof response.statusText !== 'string' ||
+			typeof response.headers?.entries !== 'function' ||
+			(response.body !== null && typeof response.body !== 'object')
+		) {
+			return undefined;
+		}
+		return new globalThis.Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: new globalThis.Headers(response.headers),
+		});
+	} catch {
+		return undefined;
+	}
 }
 
 function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
@@ -598,13 +288,6 @@ function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonVal
 	} finally {
 		seen.delete(value);
 	}
-}
-
-function readRetry(headers: Headers): { number: number; reason?: string } | undefined {
-	const number = parseNonNegativeInteger(headers.get('x-slack-retry-num'));
-	if (number === undefined) return undefined;
-	const reason = headers.get('x-slack-retry-reason') ?? undefined;
-	return { number, reason };
 }
 
 async function readBody(request: Request, bodyLimit: number): Promise<Uint8Array | undefined> {
@@ -710,13 +393,6 @@ function readRequiredFormValue(
 	return value;
 }
 
-function readOptionalFormValue(form: URLSearchParams, key: string): string | undefined {
-	const values = form.getAll(key);
-	if (values.length === 0) return undefined;
-	if (values.length !== 1 || !values[0]) return undefined;
-	return values[0];
-}
-
 function readOptionalFormBoolean(
 	form: URLSearchParams,
 	key: string,
@@ -757,11 +433,6 @@ function readRecord(
 function readString(value: Record<string, unknown>, key: string): string | undefined {
 	const field = value[key];
 	return typeof field === 'string' ? field : undefined;
-}
-
-function readOptionalString(value: Record<string, unknown>, key: string): string | undefined {
-	const field = readString(value, key);
-	return field && field.length > 0 ? field : undefined;
 }
 
 function parseNonNegativeInteger(value: string | null): number | undefined {

@@ -20,9 +20,8 @@ combination.
 
 Install `@flue/slack` and Slack's official
 `@slack/web-api@^8.0.0-rc.1` SDK with the project's package manager. Version 8
-uses the standard Fetch API and explicitly supports Cloudflare Workers. Flue's
-Cloudflare target enables the `nodejs_compat` flag required by the current
-release candidate.
+uses Fetch and supports Cloudflare Workers with Flue's existing
+`nodejs_compat` configuration.
 
 ## Create the channel
 
@@ -43,20 +42,23 @@ export const channel = createSlackChannel({
   teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
-  async events({ event }) {
-    switch (event.type) {
+  async events({ payload }) {
+    if (payload.type !== 'event_callback') return;
+
+    switch (payload.event.type) {
       case 'app_mention': {
+        const event = payload.event;
         const thread = {
-          teamId: event.teamId,
-          channelId: event.payload.channelId,
-          threadTs: event.payload.threadTs ?? event.payload.messageTs,
+          teamId: payload.team_id,
+          channelId: event.channel,
+          threadTs: event.thread_ts ?? event.ts,
         };
         await dispatch(assistant, {
           id: channel.conversationKey(thread),
           input: {
             type: 'slack.app_mention',
-            eventId: event.eventId,
-            text: event.payload.text,
+            eventId: payload.event_id,
+            text: event.text,
           },
         });
         return;
@@ -68,14 +70,16 @@ export const channel = createSlackChannel({
 
   // Enable this surface only when the application handles interactions.
   // Path: /channels/slack/interactions
-  // async interactions({ interaction }) {
-  //   return;
+  // async interactions({ payload }) {
+  //   if (payload.type === 'block_actions') {
+  //     await handleActions(payload.actions);
+  //   }
   // },
 
   // Enable this surface only when the application handles slash commands.
   // Path: /channels/slack/commands
-  // async commands({ c, command }) {
-  //   return c.json({ response_type: 'ephemeral', text: `Received ${command.command}` });
+  // async commands({ c, payload }) {
+  //   return c.json({ response_type: 'ephemeral', text: `Received ${payload.command}` });
   // },
 });
 
@@ -101,20 +105,20 @@ export function replyInThread(ref: { channelId: string; threadTs: string }) {
 }
 ```
 
-Omitting `events`, `interactions`, or `commands` omits that route. Leave an
-unused surface commented out rather than publishing an empty handler. If the
-user does not need thread replies, replace or omit the example tool. Keep
-channel ids, credentials, and arbitrary Slack API methods out of tool arguments
-unless explicitly authorized.
+Slack Events API callbacks receive the provider-native outer `payload`.
+`payload.event` uses the official `SlackEvent` union re-exported by
+`@flue/slack`. Preserve Slack field names and discriminants; do not add a
+parallel normalized event model. Filtering bot messages, message subtypes, or
+event families belongs in the application callback.
 
-Interaction and slash-command values under `capabilities` are short-lived
-provider capabilities. Use `triggerId`, `responseUrl`, and view response URLs
-only in immediate trusted application code. Never copy them into dispatch
-input, model context, logs, or durable session data.
+Omitting `events`, `interactions`, or `commands` omits that route. Leave unused
+surfaces commented out. If the application does not need thread replies,
+replace or omit the example tool. Keep channel ids, credentials, and arbitrary
+Slack API methods out of tool arguments unless explicitly authorized.
 
-For Cloudflare projects, follow existing Worker binding conventions for
-secrets. Keep using the project-owned `WebClient`; do not replace
-`@flue/slack` ingress ownership.
+`trigger_id`, `response_url`, and view `response_urls` are short-lived provider
+capabilities. Use them only in immediate trusted request handling. Never copy
+them into dispatch input, model context, logs, or durable session data.
 
 ## Wire the agent
 
@@ -128,22 +132,31 @@ export default createAgent(({ id }) => ({
 }));
 ```
 
-The channel-agent import cycle is supported only because imported bindings are
-read inside deferred callbacks and initializers.
+The channel-agent import cycle is supported because imported bindings are read
+inside deferred callbacks and initializers.
 
 ## Credentials and verification
 
 `SLACK_SIGNING_SECRET` verifies exact request bytes. `SLACK_APP_ID` and
 `SLACK_TEAM_ID` constrain trusted inbound identity. `SLACK_BOT_TOKEN`
 authenticates outbound Web API calls. Follow project secret conventions and
-never invent values. Slack URL verification supplies only a signed challenge,
-so the package acknowledges it using signature verification rather than
-payload identity fields.
+never invent values. Slack URL verification is acknowledged internally after
+signature verification.
 
-Run the project's typecheck and configured build. Generate local
-`X-Slack-Signature` values from representative Events API and interaction
-payloads and URL-encoded slash commands. Test the URL verification handshake,
-timestamp rejection, identity mismatch, org-wide-install rejection, all
-configured route paths, optional route omission, and default empty `200`.
-Exercise one `WebClient` call through a fake Fetch transport in workerd. Do not
-contact Slack.
+Configure only required provider URLs:
+
+```txt
+/channels/slack/events
+/channels/slack/interactions
+/channels/slack/commands
+```
+
+Run the project typecheck and configured Node and Cloudflare builds. Generate
+local `X-Slack-Signature` values from original synthetic Events API,
+interaction, and slash-command payloads. Test URL verification, exact-byte
+signature rejection, timestamp rejection, identity mismatch, org-wide-install
+rejection, native payload pass-through, optional route omission, and default
+empty `200`.
+
+Exercise `WebClient` methods used by the application through fake Fetch
+responses in Node or workerd. Do not contact Slack.

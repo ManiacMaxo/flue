@@ -12,40 +12,56 @@ export const channel = createSlackChannel({
   teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
-  async events({ event }) {
-    await handleEvent(event);
+  async events({ c, payload }) {
+    if (payload.type !== 'event_callback') return;
+
+    switch (payload.event.type) {
+      case 'app_mention':
+        await handleMention(payload.event, payload.event_id);
+        return;
+      default:
+        console.log(c.req.header('x-slack-retry-num'));
+        return;
+    }
   },
 
   // Omit this callback to omit the route.
   // Path: /channels/slack/interactions
-  async interactions({ interaction }) {
-    await handleInteraction(interaction);
+  async interactions({ payload }) {
+    await handleInteraction(payload);
   },
 
   // Omit this callback to omit the route.
   // Path: /channels/slack/commands
-  async commands({ c, command }) {
-    return c.json({ response_type: 'ephemeral', text: `Received ${command.command}` });
+  async commands({ c, payload }) {
+    return c.json({ response_type: 'ephemeral', text: `Received ${payload.command}` });
   },
 });
 ```
 
-Place this export in `channels/slack.ts`. Flue discovers configured surfaces at
-`/channels/slack/events`, `/channels/slack/interactions`, and
-`/channels/slack/commands` relative to the `flue()` mount. At least one
-callback is required.
+Place the named `channel` export in `channels/slack.ts`. Flue serves configured
+surfaces at:
 
-The package verifies exact request bytes and Slack's timestamp window, handles
-Slack's identity-free URL verification challenge internally, checks configured
-app and workspace identity where the payload supplies it, and normalizes known
-and unknown verified payloads. Returning nothing produces an empty `200`; JSON
-values, Slack view-validation bodies, and ordinary Hono responses are
-supported.
+- `POST /channels/slack/events`
+- `POST /channels/slack/interactions`
+- `POST /channels/slack/commands`
+
+Paths are relative to the `flue()` mount. Omitting a callback omits its route;
+at least one callback is required.
+
+The package verifies Slack signatures over exact request bytes, enforces the
+five-minute timestamp window, checks the configured app and workspace, and
+rejects org-wide installations. URL verification is handled internally.
+Authenticated application deliveries preserve Slack's field names, nesting,
+and discriminants. Nested Events API events use the official `SlackEvent` type
+from `@slack/types`, which this package re-exports.
+
+Returning nothing produces an empty `200`. JSON-compatible values become JSON
+responses, and ordinary Hono or Fetch `Response` values pass through.
+Callbacks have a default and maximum 2.5-second deadline.
 
 This package does not include an outbound Slack client or model tools. Run
-`flue add slack` to generate editable project code using the Slack Web API or a
-target-compatible Fetch client and application-owned `defineTool(...)` values.
-
-Conversation keys are stable thread identifiers, not authorization
-capabilities. The package is stateless and does not deduplicate Events API
-retries.
+`flue add slack` for editable project code using the official
+`@slack/web-api` client. Conversation keys are stable thread identifiers, not
+authorization capabilities. The package is stateless and does not deduplicate
+Events API retries.

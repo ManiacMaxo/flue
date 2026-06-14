@@ -50,6 +50,64 @@ describe('flue()', () => {
 		});
 	});
 
+	it('serves a channel response when it comes from another JavaScript realm', async () => {
+		const nativeResponse = new Response('accepted', { status: 202 });
+		const response = new Proxy(nativeResponse, {
+			get(target, property) {
+				const value = Reflect.get(target, property, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+			getPrototypeOf() {
+				return null;
+			},
+		});
+		expect(response).not.toBeInstanceOf(Response);
+		expect(Object.prototype.toString.call(response)).toBe('[object Response]');
+
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				slack: {
+					'POST /events': async () => response,
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/', flue());
+
+		const result = await app.fetch(
+			new Request('http://localhost/channels/slack/events', { method: 'POST' }),
+		);
+
+		expect(result.status).toBe(202);
+		expect(await result.text()).toBe('accepted');
+	});
+
+	it('rejects a tagged object when a channel handler does not return a Fetch response', async () => {
+		configureFlueRuntime({
+			target: 'node',
+			manifest: { agents: [] },
+			channelHandlers: {
+				slack: {
+					'POST /events': async () =>
+						({ [Symbol.toStringTag]: 'Response' }) as unknown as Response,
+				},
+			},
+		});
+		const app = new Hono();
+		app.route('/', flue());
+
+		const response = await app.fetch(
+			new Request('http://localhost/channels/slack/events', { method: 'POST' }),
+		);
+
+		expect(response.status).toBe(500);
+		expect(await response.json()).toMatchObject({
+			error: { type: 'internal_error' },
+		});
+	});
+
 	it('serves an explicit channel HEAD route with the original request method', async () => {
 		const handler = vi.fn(async (c) => {
 			expect(c.req.method).toBe('HEAD');

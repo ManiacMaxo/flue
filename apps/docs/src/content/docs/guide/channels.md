@@ -4,8 +4,8 @@ description: Receive verified provider events and connect them to Flue applicati
 ---
 
 Channels bring provider HTTP events into a Flue application. A channel verifies
-the provider request, normalizes it into typed provider-native data, and calls
-your application handler. Your handler can dispatch work to an agent, invoke
+the provider request, parses it into typed provider-native data, and calls your
+application handler. Your handler can dispatch work to an agent, invoke
 application code, or return a provider-specific response.
 
 Channels are intentionally focused on inbound HTTP. They are not universal
@@ -37,8 +37,9 @@ export const channel = createSlackChannel({
   teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
-  async events({ event }) {
-    // Handle the verified event.
+  async events({ payload }) {
+    if (payload.type !== 'event_callback') return;
+    // Handle payload.event using Slack's native types and fields.
   },
 });
 ```
@@ -59,7 +60,7 @@ event affects the rest of the system.
 | ------------------------------------------------------ | --------------- |
 | Request authentication and signature verification      | Channel package |
 | Provider handshakes and automatic protocol responses   | Channel package |
-| Body limits, parsing, and typed event normalization    | Channel package |
+| Body limits, parsing, and typed provider payloads      | Channel package |
 | Discovered routes beneath `/channels/<name>/...`       | Flue            |
 | Provider SDK client and outbound credentials           | Application     |
 | OAuth, installation, token storage, and token rotation | Application     |
@@ -111,37 +112,40 @@ custom URL. See [Routing](/docs/guide/routing/).
 
 Each provider constructor accepts callbacks for its HTTP surfaces. The callback
 runs only after the package has performed the applicable request
-authentication, parsing, normalization, and identity checks. Handshakes that
-do not represent application events are handled before the callback:
+authentication, parsing, and identity checks. Handshakes that do not represent
+application events are handled before the callback:
 
-```ts title="src/channels/github.ts"
+```ts title="src/channels/slack.ts"
 import { dispatch } from '@flue/runtime';
-import { createGitHubChannel } from '@flue/github';
+import { createSlackChannel } from '@flue/slack';
 import assistant from '../agents/assistant.ts';
 
-export const channel = createGitHubChannel({
-  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
+export const channel = createSlackChannel({
+  signingSecret: process.env.SLACK_SIGNING_SECRET!,
+  appId: process.env.SLACK_APP_ID!,
+  teamId: process.env.SLACK_TEAM_ID!,
 
-  // Path: /channels/github/webhook
-  async webhook({ c, event }) {
-    switch (event.type) {
-      case 'issues.opened':
-      case 'pull_request.opened':
+  // Path: /channels/slack/events
+  async events({ payload }) {
+    if (payload.type !== 'event_callback') return;
+
+    switch (payload.event.type) {
+      case 'app_mention': {
+        const event = payload.event;
         await dispatch(assistant, {
           id: channel.conversationKey({
-            owner: event.repository.owner,
-            repo: event.repository.name,
-            issueNumber:
-              event.type === 'issues.opened'
-                ? event.payload.issue.number
-                : event.payload.pullRequest.number,
+            teamId: payload.team_id,
+            channelId: event.channel,
+            threadTs: event.thread_ts ?? event.ts,
           }),
           input: {
-            type: `github.${event.type}`,
-            deliveryId: event.deliveryId,
+            type: 'slack.app_mention',
+            eventId: payload.event_id,
+            text: event.text,
           },
         });
         return;
+      }
       default:
         return;
     }
@@ -150,10 +154,11 @@ export const channel = createGitHubChannel({
 ```
 
 The callback receives one extensible object containing the authentic Hono
-context as `c` and provider-specific typed data such as `event`, `interaction`,
-or `command`. Use a `switch` to group provider event types that share behavior.
-Verified event families that a package does not normalize may be exposed as an
-`unknown` variant; consult the provider package reference for its exact union.
+context as `c` and provider-specific typed data such as `payload`, `event`, or
+`interaction`. First-party channels prefer authoritative provider-maintained
+types and preserve provider field names, nesting, and discriminants. Use a
+`switch` to group provider event types that share behavior, and consult the
+provider package reference for its exact callback shape.
 
 Some providers expose multiple optional surfaces. Omitting an optional callback
 omits its route instead of publishing an empty handler.
@@ -180,14 +185,16 @@ Use `dispatch(...)` when an accepted event should become asynchronous input to
 a continuing agent:
 
 ```ts
-await dispatch(assistant, {
-  id: channel.conversationKey(thread),
-  input: {
-    type: 'slack.app_mention',
-    eventId: event.eventId,
-    text: event.payload.text,
-  },
-});
+if (payload.type === 'event_callback' && payload.event.type === 'app_mention') {
+  await dispatch(assistant, {
+    id: channel.conversationKey(thread),
+    input: {
+      type: 'slack.app_mention',
+      eventId: payload.event_id,
+      text: payload.event.text,
+    },
+  });
+}
 ```
 
 Your application chooses the agent and instance id before dispatch. A provider
@@ -272,9 +279,9 @@ tokens, and other short-lived provider capabilities out of:
 - logs;
 - durable agent session history.
 
-Use those values only in immediate trusted application code. Normalized
-identity such as a workspace id, repository name, or channel id may still be
-sensitive and does not by itself authorize an operation.
+Use those values only in immediate trusted application code. Provider identity
+such as a workspace id, repository name, or channel id may still be sensitive
+and does not by itself authorize an operation.
 
 ## Run on Node and Cloudflare
 

@@ -12,10 +12,8 @@ Import from `@flue/slack`.
 function createSlackChannel<E extends Env = Env>(options: SlackChannelOptions<E>): SlackChannel<E>;
 ```
 
-Creates one stateless, fixed-application, fixed-workspace Slack channel. At
-least one of `events`, `interactions`, or `commands` is required. Callbacks are
-stored during construction and run only after request verification and
-applicable identity checks.
+Creates one stateless Slack channel for a fixed application and workspace. At
+least one handler is required.
 
 ## `SlackChannelOptions`
 
@@ -26,22 +24,102 @@ interface SlackChannelOptions<E extends Env = Env> {
   teamId: string;
   bodyLimit?: number;
   handlerTimeoutMs?: number;
-  events?(input: { c: Context<E>; event: SlackEvent }): SlackHandlerResult;
-  interactions?(input: { c: Context<E>; interaction: SlackInteraction }): SlackHandlerResult;
-  commands?(input: { c: Context<E>; command: SlackSlashCommand }): SlackHandlerResult;
+  events?(input: { c: Context<E>; payload: SlackEventsApiPayload }): SlackHandlerResult;
+  interactions?(input: { c: Context<E>; payload: SlackInteractionPayload }): SlackHandlerResult;
+  commands?(input: { c: Context<E>; payload: SlackSlashCommandPayload }): SlackHandlerResult;
 }
 ```
 
-| Field              | Description                                                  |
-| ------------------ | ------------------------------------------------------------ |
-| `signingSecret`    | Secret used for Slack request signatures.                    |
-| `appId`            | Expected signed Slack application id.                        |
-| `teamId`           | Expected workspace id. Org-wide installs are not supported.  |
-| `bodyLimit`        | Maximum request body in bytes. Default: 1 MiB.               |
-| `handlerTimeoutMs` | Handler deadline. Default: 2500; maximum: 2500.              |
-| `events`           | Optional Events API callback. Omission removes `/events`.    |
-| `interactions`     | Optional interactivity callback. Omission removes the route. |
-| `commands`         | Optional slash-command callback. Omission removes the route. |
+| Field              | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `signingSecret`    | Secret used to verify Slack request signatures.               |
+| `appId`            | Expected Slack application id.                                |
+| `teamId`           | Expected workspace id. Org-wide installs are rejected.        |
+| `bodyLimit`        | Maximum request body in bytes. Defaults to 1 MiB.             |
+| `handlerTimeoutMs` | Handler deadline. Defaults to and may not exceed 2500 ms.     |
+| `events`           | Events API handler. Omission removes `POST /events`.          |
+| `interactions`     | Interactivity handler. Omission removes `POST /interactions`. |
+| `commands`         | Slash-command handler. Omission removes `POST /commands`.     |
+
+URL verification is handled internally. Other authenticated deliveries reach
+the configured handler after applicable app, workspace, and installation
+checks.
+
+## Events API types
+
+```ts
+type SlackEventsApiPayload = SlackEventCallbackPayload | SlackAppRateLimitedPayload;
+
+interface SlackEventCallbackPayload {
+  token: string;
+  team_id: string;
+  enterprise_id?: string | null;
+  context_team_id?: string;
+  context_enterprise_id?: string | null;
+  api_app_id: string;
+  event: SlackEvent;
+  type: 'event_callback';
+  event_id: string;
+  event_time: number;
+  event_context?: string;
+  is_ext_shared_channel?: boolean;
+  authorizations?: SlackAuthorization[];
+}
+```
+
+`SlackEvent` is re-exported from the official `@slack/types` package. Use
+`payload.type` to narrow the outer delivery and `payload.event.type` or
+`payload.event.subtype` to narrow the provider event. Retry headers remain
+available through `c.req.header(...)`.
+
+## Interaction types
+
+```ts
+type SlackInteractionPayload =
+  | SlackBlockActionsPayload
+  | SlackViewSubmissionPayload
+  | SlackViewClosedPayload
+  | SlackShortcutPayload
+  | SlackMessageActionPayload
+  | SlackBlockSuggestionPayload
+  | SlackInteractiveMessagePayload
+  | SlackInteractiveMessageSuggestionPayload
+  | SlackDialogSubmissionPayload
+  | SlackDialogSuggestionPayload
+  | SlackWorkflowStepEditPayload;
+```
+
+These local types preserve Slack's JSON field names and nesting, including
+legacy interactive messages, dialogs, suggestions, and the deprecated
+Steps-from-Apps edit payload. Authenticated future interaction types are
+forwarded at runtime even when the installed type version does not yet include
+their discriminant.
+
+## `SlackSlashCommandPayload`
+
+Provider-native URL-encoded slash-command fields, including:
+
+```ts
+interface SlackSlashCommandPayload {
+  command: string;
+  text: string;
+  response_url: string;
+  trigger_id: string;
+  user_id: string;
+  team_id: string;
+  channel_id: string;
+  api_app_id: string;
+  user_name?: string;
+  team_domain?: string;
+  channel_name?: string;
+  enterprise_id?: string;
+  enterprise_name?: string;
+  is_enterprise_install?: string;
+  [key: string]: unknown;
+}
+```
+
+## Handler results
 
 ```ts
 type SlackHandlerResult =
@@ -53,7 +131,14 @@ type SlackHandlerResult =
 ```
 
 Returning nothing produces an empty `200`. JSON-compatible values become JSON
-responses. An ordinary Hono or Fetch `Response` passes through unchanged.
+responses. Hono and Fetch responses pass through unchanged.
+
+```ts
+interface SlackViewValidationResponse {
+  response_action: 'errors';
+  errors: Record<string, string>;
+}
+```
 
 ## `SlackChannel`
 
@@ -63,131 +148,17 @@ interface SlackChannel<E extends Env = Env> {
   conversationKey(ref: SlackThreadRef): string;
   parseConversationKey(id: string): SlackThreadRef;
 }
-```
 
-Configured routes are declared as `POST /events`, `POST /interactions`, or
-`POST /commands`. With `channels/slack.ts`, they are served beneath
-`/channels/slack` relative to the `flue()` mount.
-
-## Events API
-
-```ts
-type SlackEvent =
-  | SlackEventEnvelope<'app_mention', SlackAppMentionPayload>
-  | SlackEventEnvelope<'message', SlackMessagePayload>
-  | SlackUnknownEvent;
-```
-
-```ts
-interface SlackEventEnvelope<TType extends string, TPayload> {
-  type: TType;
-  eventId: string;
-  appId: string;
-  teamId: string;
-  retry?: { number: number; reason?: string };
-  payload: TPayload;
-  raw: unknown;
-}
-```
-
-Unsupported verified events use `type: 'unknown'` and expose the original
-`eventType`. Their `eventId` is optional because unsupported outer Events API
-envelopes do not always include one. URL verification is handled internally
-from the signed challenge; Slack does not include app or workspace identity in
-that payload. Plain user messages are normalized; message subtypes and bot
-messages are ignored.
-
-## Interactions
-
-```ts
-type SlackInteraction =
-  | SlackActionEnvelope
-  | SlackViewSubmissionEnvelope
-  | SlackViewClosedEnvelope
-  | SlackShortcutEnvelope
-  | SlackMessageShortcutEnvelope
-  | SlackBlockSuggestionEnvelope
-  | SlackUnknownInteraction;
-```
-
-Action envelopes expose `type: 'action'`, trusted app/team/user identity,
-`actionId`, optional `value`, provider container context, optional channel and
-thread identity, the provider-native action under `payload`, and the complete
-parsed body under `raw`. Actions originating from views do not require message
-context.
-
-View submissions expose `type: 'view_submission'`, `viewId`, `callbackId`,
-optional `privateMetadata`, and provider values.
-
-Global and message shortcuts expose their callback ids. View closures expose
-`isCleared`. Block suggestions expose the action, block, and current input value
-needed to return provider-native option JSON.
-
-Some shortcut payloads do not include `api_app_id`. After signature
-verification, the normalized `appId` is the channel's configured application
-id; a supplied mismatched id is rejected.
-
-```ts
-interface SlackViewValidationResponse {
-  response_action: 'errors';
-  errors: Record<string, string>;
-}
-```
-
-## Slash commands
-
-```ts
-interface SlackSlashCommand {
-  type: 'slash_command';
-  appId: string;
-  teamId: string;
-  enterpriseId?: string;
-  channelId: string;
-  channelName?: string;
-  userId: string;
-  userName?: string;
-  command: string;
-  text: string;
-  capabilities: SlackInteractionCapabilities & {
-    triggerId: string;
-    responseUrl: string;
-  };
-  raw: unknown;
-}
-```
-
-One `/commands` route can receive multiple configured Slack commands. Switch on
-`command.command`. Return JSON for a provider-native response or use the Hono
-context for plain text and explicit status control.
-
-## Capabilities
-
-```ts
-interface SlackInteractionCapabilities {
-  triggerId?: string;
-  responseUrl?: string;
-  responseUrls?: readonly {
-    blockId: string;
-    actionId: string;
-    channelId: string;
-    responseUrl: string;
-  }[];
-}
-```
-
-These are short-lived provider capabilities for immediate trusted application
-use. Never place them, or equivalent values from `raw`, in dispatch input,
-model context, logs, or durable history.
-
-## Identity
-
-```ts
 interface SlackThreadRef {
   teamId: string;
   channelId: string;
   threadTs: string;
 }
 ```
+
+Configured routes are relative to the discovered channel namespace. For
+`channels/slack.ts`, they are served beneath `/channels/slack` relative to the
+`flue()` mount.
 
 Conversation keys are canonical identifiers, not authorization capabilities.
 
@@ -196,8 +167,6 @@ Conversation keys are canonical identifiers, not authorization capabilities.
 - `InvalidSlackConversationKeyError`
 - `InvalidSlackInputError`, with structured `field`
 
-Requests outside Slack's five-minute timestamp window are rejected. The package
-rejects org-wide installations and does not deduplicate Events API retries.
-
-See [Slack setup](/docs/ecosystem/channels/slack/) for composition with the Slack
-Web API and application-owned tools.
+The channel does not deduplicate Events API retries. See
+[Slack](/docs/ecosystem/channels/slack/) for provider setup and composition
+with the Slack Web API.

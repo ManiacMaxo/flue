@@ -625,14 +625,40 @@ const channelRouteHandler: MiddlewareHandler = async (c) => {
 		});
 	}
 
-	const response = await handler(c);
-	if (!(response instanceof Response)) {
+	const response = normalizeFetchResponse(await handler(c));
+	if (!response) {
 		throw new TypeError(
 			`[flue] Channel "${name}" handler for ${c.req.method} ${suffix} must return a Response.`,
 		);
 	}
 	return response;
 };
+
+function normalizeFetchResponse(value: unknown): Response | undefined {
+	if (value instanceof globalThis.Response) return value;
+	if (Object.prototype.toString.call(value) !== '[object Response]') return undefined;
+	if (typeof value !== 'object' || value === null) return undefined;
+	try {
+		const response = value as Response;
+		if (
+			!Number.isInteger(response.status) ||
+			response.status < 200 ||
+			response.status > 599 ||
+			typeof response.statusText !== 'string' ||
+			typeof response.headers?.entries !== 'function' ||
+			(response.body !== null && typeof response.body !== 'object')
+		) {
+			return undefined;
+		}
+		return new globalThis.Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: new Headers(response.headers),
+		});
+	} catch {
+		return undefined;
+	}
+}
 
 const runStreamReadHandler: MiddlewareHandler = async (c) => {
 	const rt = requiredRuntime();

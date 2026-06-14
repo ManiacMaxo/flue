@@ -11,20 +11,23 @@ export const channel = createSlackChannel({
 	teamId: requiredEnv('SLACK_TEAM_ID'),
 
 	// Path: /channels/slack/events
-	async events({ event }) {
-		switch (event.type) {
+	async events({ payload }) {
+		if (payload.type !== 'event_callback') return;
+
+		switch (payload.event.type) {
 			case 'app_mention': {
+				const event = payload.event;
 				const thread = {
-					teamId: event.teamId,
-					channelId: event.payload.channelId,
-					threadTs: event.payload.threadTs ?? event.payload.messageTs,
+					teamId: payload.team_id,
+					channelId: event.channel,
+					threadTs: event.thread_ts ?? event.ts,
 				};
 				await dispatch(assistant, {
 					id: channel.conversationKey(thread),
 					input: {
 						type: 'slack.app_mention',
-						eventId: event.eventId,
-						text: event.payload.text,
+						eventId: payload.event_id,
+						text: event.text,
 					},
 				});
 				return;
@@ -36,14 +39,17 @@ export const channel = createSlackChannel({
 
 	// Enable this surface when the application handles Block Kit or view interactions.
 	// Path: /channels/slack/interactions
-	// async interactions({ interaction }) {
+	// async interactions({ payload }) {
+	// 	if (payload.type === 'block_actions') {
+	// 		// Handle payload.actions using Slack's native field names.
+	// 	}
 	// 	return;
 	// },
 
 	// Enable this surface when the application handles slash commands.
 	// Path: /channels/slack/commands
-	// async commands({ c, command }) {
-	// 	return c.json({ response_type: 'ephemeral', text: `Received ${command.command}` });
+	// async commands({ c, payload }) {
+	// 	return c.json({ response_type: 'ephemeral', text: `Received ${payload.command}` });
 	// },
 });
 

@@ -1,6 +1,6 @@
 ---
 title: Slack
-description: Receive verified Slack events and use the Slack Web API from application tools.
+description: Receive verified Slack events and use the Slack Web API from application code.
 ---
 
 ## Add Slack
@@ -11,24 +11,39 @@ Run the Slack recipe through your coding agent:
 flue add slack --print | codex
 ```
 
-It installs `@flue/slack` and Slack's official
-`@slack/web-api@^8.0.0-rc.1` SDK. Version 8 uses Fetch and supports both Node
-and Cloudflare Workers. The recipe creates `src/channels/slack.ts` with named
-`channel` and `client` exports.
+It installs `@flue/slack` for verified ingress and Slack's official
+`@slack/web-api@^8.0.0-rc.1` SDK for outbound API calls. The recipe creates
+`src/channels/slack.ts` with named `channel` and `client` exports.
 
-Configure only the surfaces your application uses:
+Set these application secrets:
+
+| Variable               | Purpose                                     |
+| ---------------------- | ------------------------------------------- |
+| `SLACK_SIGNING_SECRET` | Verifies inbound request bytes.             |
+| `SLACK_APP_ID`         | Restricts deliveries to one Slack app.      |
+| `SLACK_TEAM_ID`        | Restricts deliveries to one workspace.      |
+| `SLACK_BOT_TOKEN`      | Authenticates outbound Slack Web API calls. |
+
+## Configure Slack
+
+Add only the Slack surfaces your application handles:
 
 ```txt
-https://example.com/channels/slack/events
-https://example.com/channels/slack/interactions
-https://example.com/channels/slack/commands
+Events API:    https://example.com/channels/slack/events
+Interactivity: https://example.com/channels/slack/interactions
+Commands:      https://example.com/channels/slack/commands
 ```
 
-`SLACK_SIGNING_SECRET` verifies inbound bytes. `SLACK_APP_ID` and
-`SLACK_TEAM_ID` constrain signed provider identity. `SLACK_BOT_TOKEN`
-authenticates outbound Web API calls.
+Use `/events` as the Event Subscriptions request URL and subscribe to the
+minimum bot events the application needs. Use `/interactions` as the
+Interactivity request URL for Block Kit actions, shortcuts, modals, and
+external select suggestions. Use `/commands` as the request URL for each slash
+command handled by this channel.
 
-## Channel module
+Omitting a callback from `createSlackChannel()` omits its route. Slack URL
+verification is answered internally after signature verification.
+
+## Receive Events API payloads
 
 ```ts title="src/channels/slack.ts"
 import { defineTool, dispatch } from '@flue/runtime';
@@ -44,20 +59,23 @@ export const channel = createSlackChannel({
   teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
-  async events({ event }) {
-    switch (event.type) {
+  async events({ payload }) {
+    if (payload.type !== 'event_callback') return;
+
+    switch (payload.event.type) {
       case 'app_mention': {
+        const event = payload.event;
         const thread = {
-          teamId: event.teamId,
-          channelId: event.payload.channelId,
-          threadTs: event.payload.threadTs ?? event.payload.messageTs,
+          teamId: payload.team_id,
+          channelId: event.channel,
+          threadTs: event.thread_ts ?? event.ts,
         };
         await dispatch(assistant, {
           id: channel.conversationKey(thread),
           input: {
             type: 'slack.app_mention',
-            eventId: event.eventId,
-            text: event.payload.text,
+            eventId: payload.event_id,
+            text: event.text,
           },
         });
         return;
@@ -66,20 +84,73 @@ export const channel = createSlackChannel({
         return;
     }
   },
-
-  // Enable only when this application handles interactivity.
-  // Path: /channels/slack/interactions
-  // async interactions({ interaction }) {
-  //   return;
-  // },
-
-  // Enable only when this application handles slash commands.
-  // Path: /channels/slack/commands
-  // async commands({ c, command }) {
-  //   return c.json({ response_type: 'ephemeral', text: `Received ${command.command}` });
-  // },
 });
+```
 
+`payload` is Slack's outer Events API delivery. For `event_callback`,
+`payload.event` uses the official `SlackEvent` union from `@slack/types`.
+Switching on `payload.event.type` narrows events such as `app_mention`,
+`reaction_added`, Assistant events, and `message`. Message subtypes remain
+available through `payload.event.subtype`.
+
+The channel does not filter bot messages, message subtypes, or event families.
+Your handler decides which authenticated events affect the application.
+`app_rate_limited` notifications also reach the callback.
+
+## Handle interactions and commands
+
+Enable a surface only when the application handles it:
+
+```ts
+export const channel = createSlackChannel({
+  signingSecret: process.env.SLACK_SIGNING_SECRET!,
+  appId: process.env.SLACK_APP_ID!,
+  teamId: process.env.SLACK_TEAM_ID!,
+
+  // Path: /channels/slack/interactions
+  async interactions({ payload }) {
+    switch (payload.type) {
+      case 'block_actions':
+        await handleActions(payload.actions);
+        return;
+      case 'view_submission':
+        return {
+          response_action: 'errors',
+          errors: { email: 'Enter a valid email address.' },
+        };
+      default:
+        return;
+    }
+  },
+
+  // Path: /channels/slack/commands
+  async commands({ c, payload }) {
+    switch (payload.command) {
+      case '/triage':
+        await startTriage(payload.text);
+        return c.json({ response_type: 'ephemeral', text: 'Triage started.' });
+      default:
+        return c.text('Unknown command.', 404);
+    }
+  },
+});
+```
+
+Interaction and command payloads preserve Slack's snake_case wire fields.
+`trigger_id`, `response_url`, and view `response_urls` are short-lived
+capabilities. Keep them in immediate trusted request handling, not dispatch
+input, model context, logs, or durable session history.
+
+Returning nothing produces an empty `200`. Return JSON-compatible data for a
+JSON response, or use the Hono context for explicit status, headers, and body.
+Handlers default to a 2.5-second deadline so Slack receives an acknowledgement
+within its three-second window.
+
+## Reply with `WebClient`
+
+Outbound Slack behavior belongs to the exported SDK client:
+
+```ts
 export function replyInThread(ref: { channelId: string; threadTs: string }) {
   return defineTool({
     name: 'reply_in_slack_thread',
@@ -102,18 +173,7 @@ export function replyInThread(ref: { channelId: string; threadTs: string }) {
 }
 ```
 
-Omitting `events`, `interactions`, or `commands` omits that route. The Events
-API supports normalized `app_mention` and plain user `message` variants.
-Interactivity supports actions, view submissions and closures, global and
-message shortcuts, and block suggestions. Unsupported verified events and
-interactions reach the callback as `type: 'unknown'`. Slack URL verification is
-handled internally from its signed challenge; that request does not include app
-or workspace identity fields.
-
-For a view submission, return Slack's native validation body or an ordinary
-Hono response. An empty callback result becomes an empty `200`.
-
-## Bind the tool
+Bind the destination in trusted code:
 
 ```ts title="src/agents/assistant.ts"
 import { createAgent } from '@flue/runtime';
@@ -125,15 +185,57 @@ export default createAgent(({ id }) => ({
 }));
 ```
 
-The model selects message text; trusted code binds the workspace, channel, and
-thread. Interaction and slash-command `capabilities` can contain short-lived
-`triggerId`, `responseUrl`, and view response URL values. Use them only in
-immediate trusted application code. Never place them in dispatch input, model
-context, logs, or durable session data.
+The model selects message text. It does not select arbitrary workspaces,
+channels, credentials, or Web API methods.
 
-Slack may retry failed or timed-out Events API deliveries. Claim `eventId` in
-application-owned durable storage when duplicate admission is unacceptable.
-Every callback has a default and maximum 2.5-second deadline so Flue can respond
-before Slack's three-second acknowledgement window.
+## Show Assistant status
+
+For Slack Assistant threads, use the SDK directly:
+
+```ts
+await client.assistant.threads.setStatus({
+  channel_id: channelId,
+  thread_ts: threadTs,
+  status: 'is thinking...',
+});
+```
+
+This is a Slack Web API capability, not behavior implemented by
+`@flue/slack`.
+
+## Stream a reply
+
+The v8 client exposes `chatStream()` over Slack's streaming message APIs:
+
+```ts
+const stream = client.chatStream({
+  channel: channelId,
+  thread_ts: threadTs,
+  recipient_team_id: teamId,
+  recipient_user_id: userId,
+});
+
+await stream.append({ markdown_text: 'First part' });
+await stream.append({ markdown_text: ' and the rest.' });
+await stream.stop();
+```
+
+The example executes `chat.postMessage`,
+`assistant.threads.setStatus`, and the start/append/stop streaming sequence
+against fake Fetch responses in workerd. No test contacts Slack.
+
+## Handle retries
+
+Slack may retry failed or timed-out Events API deliveries. Read
+`x-slack-retry-num` and `x-slack-retry-reason` from `c.req.header(...)`.
+Preserve `payload.event_id` for tracing, and claim it in application-owned
+durable storage before dispatch when duplicate admission is unacceptable.
+
+The channel is fixed to one app and workspace and rejects org-wide
+installations. OAuth installation storage, Socket Mode, token rotation, and
+multi-workspace routing remain application concerns.
+
+The Fetch-based Slack Web API v8 release candidate runs in Node and in
+Cloudflare Workers with Flue's required `nodejs_compat` setting.
 
 See the [`@flue/slack` API reference](/docs/api/slack-channel/).
