@@ -188,20 +188,28 @@ function statusConversation<E extends Env>(
 ): TwilioConversationRef | undefined {
 	const { From, To } = payload;
 	if (!isRequired(From) || !isRequired(To)) return undefined;
-	return options.destination.type === 'address'
-		? {
-				type: 'address',
-				accountSid: payload.AccountSid,
-				address: From,
-				participant: To,
-			}
-		: {
-				type: 'messaging-service',
-				accountSid: payload.AccountSid,
-				messagingServiceSid: options.destination.messagingServiceSid,
-				address: From,
-				participant: To,
-			};
+	if (options.destination.type === 'address') {
+		if (From !== options.destination.address) return undefined;
+		return {
+			type: 'address',
+			accountSid: payload.AccountSid,
+			address: From,
+			participant: To,
+		};
+	}
+	if (
+		!isRequired(payload.MessagingServiceSid) ||
+		payload.MessagingServiceSid !== options.destination.messagingServiceSid
+	) {
+		return undefined;
+	}
+	return {
+		type: 'messaging-service',
+		accountSid: payload.AccountSid,
+		messagingServiceSid: payload.MessagingServiceSid,
+		address: From,
+		participant: To,
+	};
 }
 
 function parseConfiguredUrl(value: string): ConfiguredUrl {

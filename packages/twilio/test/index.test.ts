@@ -157,9 +157,6 @@ describe('createTwilioChannel()', () => {
 			address: '+15557003003',
 			participant: '+15557004004',
 		});
-		// The exact Twilio lifecycle value is preserved without narrowing, and
-		// a present MessagingServiceSid is forwarded verbatim — the channel no
-		// longer gates status callbacks on a service-SID match.
 		expect(input.payload).toMatchObject({
 			MessageSid: 'SM55555555555555555555555555555555',
 			AccountSid: 'AC44444444444444444444444444444444',
@@ -172,6 +169,99 @@ describe('createTwilioChannel()', () => {
 			ChannelStatusMessage: 'Undelivered by synthetic carrier',
 			RawDlrDoneDate: '2606131836',
 		});
+	});
+
+	it('exposes an address status conversation only when From matches the configured address', async () => {
+		const statusCallback = vi.fn();
+		const channel = createTwilioChannel({
+			accountSid: 'AC51515151515151515151515151515151',
+			authToken: 'auth-token-ash',
+			webhookUrl: 'https://hooks.example.test/channels/twilio/webhook',
+			statusCallbackUrl: 'https://hooks.example.test/channels/twilio/status',
+			destination: { type: 'address', address: '+15557005151' },
+			webhook() {},
+			statusCallback,
+		});
+		const matching = new URLSearchParams([
+			['MessageSid', 'SM51515151515151515151515151515151'],
+			['AccountSid', 'AC51515151515151515151515151515151'],
+			['MessageStatus', 'delivered'],
+			['From', '+15557005151'],
+			['To', '+15557006161'],
+		]);
+		const mismatching = new URLSearchParams(matching);
+		mismatching.set('From', '+15557007171');
+		const app = channelApp(channel);
+
+		const accepted = await app.request(
+			signedRequest({
+				requestUrl: 'https://hooks.example.test/channels/twilio/status',
+				signatureUrl: 'https://hooks.example.test/channels/twilio/status',
+				authToken: 'auth-token-ash',
+				params: matching,
+			}),
+		);
+		const forwarded = await app.request(
+			signedRequest({
+				requestUrl: 'https://hooks.example.test/channels/twilio/status',
+				signatureUrl: 'https://hooks.example.test/channels/twilio/status',
+				authToken: 'auth-token-ash',
+				params: mismatching,
+			}),
+		);
+
+		expect(accepted.status).toBe(200);
+		expect(forwarded.status).toBe(200);
+		expect(statusCallback).toHaveBeenCalledTimes(2);
+		expect(statusCallback.mock.calls[0]?.[0].conversation).toEqual({
+			type: 'address',
+			accountSid: 'AC51515151515151515151515151515151',
+			address: '+15557005151',
+			participant: '+15557006161',
+		});
+		expect(statusCallback.mock.calls[1]?.[0]).not.toHaveProperty('conversation');
+	});
+
+	it('forwards Messaging Service statuses without conversation when the service identity is missing or mismatched', async () => {
+		const statusCallback = vi.fn();
+		const channel = createTwilioChannel({
+			accountSid: 'AC52525252525252525252525252525252',
+			authToken: 'auth-token-birch',
+			webhookUrl: 'https://hooks.example.test/channels/twilio/webhook',
+			statusCallbackUrl: 'https://hooks.example.test/channels/twilio/status',
+			destination: {
+				type: 'messaging-service',
+				messagingServiceSid: 'MG52525252525252525252525252525252',
+			},
+			webhook() {},
+			statusCallback,
+		});
+		const missing = new URLSearchParams([
+			['MessageSid', 'SM52525252525252525252525252525252'],
+			['AccountSid', 'AC52525252525252525252525252525252'],
+			['MessageStatus', 'sent'],
+			['From', '+15557005252'],
+			['To', '+15557006262'],
+		]);
+		const mismatching = new URLSearchParams(missing);
+		mismatching.set('MessagingServiceSid', 'MG62626262626262626262626262626262');
+		const app = channelApp(channel);
+
+		for (const params of [missing, mismatching]) {
+			const result = await app.request(
+				signedRequest({
+					requestUrl: 'https://hooks.example.test/channels/twilio/status',
+					signatureUrl: 'https://hooks.example.test/channels/twilio/status',
+					authToken: 'auth-token-birch',
+					params,
+				}),
+			);
+			expect(result.status).toBe(200);
+		}
+
+		expect(statusCallback).toHaveBeenCalledTimes(2);
+		expect(statusCallback.mock.calls[0]?.[0]).not.toHaveProperty('conversation');
+		expect(statusCallback.mock.calls[1]?.[0]).not.toHaveProperty('conversation');
 	});
 
 	it('passes through an ordinary response from the application handler', async () => {

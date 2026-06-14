@@ -160,26 +160,31 @@ input mirrors the inbound shape: `payload` carries the exact `MessageStatus` str
 forwarded verbatim — never narrowed to a frozen union — alongside every other
 signed status parameter (sender, recipient, error, channel, and delivery-receipt
 fields), with the same string / `string[]` rules and index-signature forwarding.
-`conversation` is present only when both addresses are signed.
+`conversation` is present only when the signed fields identify the configured
+destination: `From` must match an address destination, or
+`MessagingServiceSid` must match a Messaging Service destination.
 
 Twilio may retry status callbacks with backoff, and may deliver them duplicated
 or out of order. Persist transitions idempotently by message SID; the channel is
 stateless and exposes `MessageSid` and `I-Twilio-Idempotency-Token` without
-claiming durable deduplication.
+claiming durable deduplication. Retried requests can reuse the idempotency token,
+but applications still own durable idempotency.
 
-Twilio does not guarantee `MessagingServiceSid` in every status callback, and
-the channel does **not** gate status callbacks on it. For a Messaging Service
-channel, the signed account SID and the exact signed callback URL scope the
-route. Read `payload.MessagingServiceSid` in application code when a present value
-matters.
+Twilio does not guarantee `MessagingServiceSid` in every status callback. The
+channel still forwards a verified callback when that field is missing or does
+not match, but omits `conversation`; it derives Messaging Service conversation
+identity only from an exact signed SID match. Read `payload.MessagingServiceSid`
+in application code when the raw value matters.
 
 ## Deadlines
 
 Twilio applies a 15-second read timeout to webhook responses and recommends
 acknowledging fast and processing asynchronously. The channel does not enforce a
-deadline of its own. Inbound message webhooks are **not** retried — on error or
-timeout Twilio falls back to the number's configured Fallback URL rather than
-re-delivering to this route — so acknowledge before slow work when a missed
-inbound matters.
+deadline of its own. Inbound message webhooks are not retried by default: on
+error or timeout Twilio uses the configured Fallback URL instead. Connection
+overrides on the webhook URL can opt into retries with `rc` (retry count) and
+`rp` (retry policy), for example `#rc=2&rp=all`; that fragment is excluded from
+the signed URL. Acknowledge before slow work and make admission idempotent when
+retries are enabled.
 
 See the [`@flue/twilio` API reference](/docs/api/twilio-channel/).

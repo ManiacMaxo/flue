@@ -73,6 +73,50 @@ describe('@flue/twilio workerd ingress', () => {
 			participant: '+15557015015',
 		});
 	});
+
+	it('forwards a status without conversation when the configured address does not match', async () => {
+		const statusCallback = vi.fn();
+		const channel = createTwilioChannel({
+			accountSid: 'AC30303030303030303030303030303030',
+			authToken: 'worker-status-token',
+			webhookUrl: 'https://public.example.test/channels/twilio/webhook',
+			statusCallbackUrl: 'https://public.example.test/channels/twilio/status',
+			destination: { type: 'address', address: '+15557016016' },
+			webhook() {},
+			statusCallback,
+		});
+		const app = new Hono();
+		for (const route of channel.routes) {
+			app.on(route.method, `/channels/twilio${route.path}`, route.handler);
+		}
+		const params = new URLSearchParams([
+			['MessageSid', 'SM40404040404040404040404040404040'],
+			['AccountSid', 'AC30303030303030303030303030303030'],
+			['MessageStatus', 'delivered'],
+			['From', '+15557017017'],
+			['To', '+15557018018'],
+		]);
+		const signature = await signatureFor(
+			'worker-status-token',
+			'https://public.example.test/channels/twilio/status',
+			params,
+		);
+
+		const result = await app.request(
+			new Request('https://internal.example.test/channels/twilio/status', {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+					'x-twilio-signature': signature,
+				},
+				body: params,
+			}),
+		);
+
+		expect(result.status).toBe(200);
+		expect(statusCallback).toHaveBeenCalledOnce();
+		expect(statusCallback.mock.calls[0]?.[0]).not.toHaveProperty('conversation');
+	});
 });
 
 async function signatureFor(

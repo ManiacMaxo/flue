@@ -50,10 +50,7 @@ type TwilioDestination =
   | { type: 'address'; address: string }
   | { type: 'messaging-service'; messagingServiceSid: string };
 
-type TwilioHandlerResult =
-  | undefined
-  | Response
-  | Promise<undefined | Response>;
+type TwilioHandlerResult = undefined | Response | Promise<undefined | Response>;
 ```
 
 Returning nothing from `webhook` produces an empty TwiML `<Response/>` with
@@ -157,9 +154,11 @@ interface TwilioStatusHandlerInput<E extends Env = Env> {
 
 - `payload` carries the exact `MessageStatus` string and every other signed status
   parameter (sender, recipient, error, channel, delivery-receipt fields).
-- `conversation` is present only when both addresses are signed (status
-  callbacks swap the sender/recipient roles: `address` is `From`, `participant`
-  is `To`).
+- `conversation` is present only when the signed fields identify the configured
+  destination. For an address destination, signed `From` must match that address;
+  for a Messaging Service destination, signed `MessagingServiceSid` must match
+  the configured service. Status callbacks swap the sender/recipient roles:
+  `address` is `From` and `participant` is `To`.
 - `idempotencyToken` is exposed as above.
 
 A request missing `MessageSid`, `AccountSid`, or `MessageStatus` is rejected with
@@ -198,17 +197,18 @@ acknowledging fast (an empty `200`/`202`) and processing asynchronously. The
 channel does not enforce a deadline of its own; it awaits the handler and
 serializes the result.
 
-The retry behavior differs by route:
+Twilio does not retry inbound message webhooks by default. A configured Fallback
+URL handles an error or timeout instead. Connection overrides on the configured
+URL can opt into retries: `rc` sets the retry count and `rp` selects which
+failures retry. The fragment carrying those overrides, such as `#rc=2&rp=all`,
+is not part of the signed URL. Status callbacks may also be retried with backoff
+and can arrive duplicated or out of order.
 
-- **Inbound message webhooks are not retried.** On error or timeout Twilio falls
-  back to the number's configured Fallback URL (or returns an error to the
-  sender) rather than re-delivering to this route.
-- **Status callbacks may be retried with backoff**, and may arrive duplicated or
-  out of order.
-
-The channel is stateless and exposes `MessageSid` and `I-Twilio-Idempotency-Token`
-without claiming durable deduplication. When duplicate admission is
-unacceptable, claim `MessageSid` before dispatch.
+The channel is stateless and exposes `MessageSid` and
+`I-Twilio-Idempotency-Token` without claiming durable deduplication. Retried
+requests can reuse the idempotency token, but applications still own durable
+idempotency. Claim `MessageSid` before dispatch when duplicate admission is
+unacceptable.
 
 ## Errors
 
