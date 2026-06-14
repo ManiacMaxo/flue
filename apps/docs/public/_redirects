@@ -1,2 +1,5 @@
 /docs /docs/getting-started/quickstart/ 302
 /docs/ /docs/getting-started/quickstart/ 302
+/docs/guide/channels /docs/ecosystem/channels/ 301
+/docs/guide/channels/ /docs/ecosystem/channels/ 301
+/docs/guide/channels/* /docs/ecosystem/channels/:splat 301

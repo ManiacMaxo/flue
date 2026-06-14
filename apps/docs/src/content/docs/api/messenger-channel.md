@@ -133,5 +133,5 @@ JSON-compatible value becomes a JSON response. An ordinary Hono or Fetch
 - `InvalidMessengerConversationKeyError`
 - `InvalidMessengerInputError`, with structured `field`
 
-See [Facebook Messenger setup](/docs/guide/channels/messenger/) for Page
+See [Facebook Messenger setup](/docs/ecosystem/channels/messenger/) for Page
 configuration and project-owned Graph API composition.

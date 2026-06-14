@@ -23,4 +23,4 @@ conversation identity. Applications own access tokens, outbound clients,
 tools, dispatch policy, and deduplication.
 
 See the prepared package docs or
-<https://flueframework.com/docs/guide/channels/whatsapp/>.
+<https://flueframework.com/docs/ecosystem/channels/whatsapp/>.

@@ -193,5 +193,5 @@ business actions, outbound clients, and tools remain application concerns.
 
 `@flue/shopify` uses Hono, standards-based Web Crypto, and `lossless-json`; it
 does not depend on the Shopify SDK or `@flue/runtime`. See
-[Shopify setup](/docs/guide/channels/shopify/) for the project-owned Admin
+[Shopify setup](/docs/ecosystem/channels/shopify/) for the project-owned Admin
 GraphQL client and Node/workerd testing guidance.

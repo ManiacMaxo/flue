@@ -165,5 +165,5 @@ interface GitHubUserRef {
 - `InvalidGitHubConversationKeyError`
 - `InvalidGitHubInputError`, with structured `field`
 
-See [GitHub setup](/docs/guide/channels/github/) for composition with Octokit
+See [GitHub setup](/docs/ecosystem/channels/github/) for composition with Octokit
 and application-owned tools.

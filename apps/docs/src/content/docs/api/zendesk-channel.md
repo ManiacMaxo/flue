@@ -222,5 +222,5 @@ tools remain application concerns.
 `@flue/zendesk` depends on Hono and `lossless-json`. It does not depend on a
 Zendesk SDK or `@flue/runtime`.
 
-See [Zendesk setup](/docs/guide/channels/zendesk/) for project-owned Fetch
+See [Zendesk setup](/docs/ecosystem/channels/zendesk/) for project-owned Fetch
 composition, ticket-bound tools, retry behavior, and Node/workerd testing.

@@ -158,5 +158,5 @@ Invalid constructor options such as a missing client or signing secret,
 unsupported payload mode, non-positive body limit, or non-positive signature
 tolerance throw a `TypeError`.
 
-See [Stripe setup](/docs/guide/channels/stripe/) for event-destination setup,
+See [Stripe setup](/docs/ecosystem/channels/stripe/) for event-destination setup,
 the project-owned SDK client, and application-owned tools.

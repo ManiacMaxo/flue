@@ -21,4 +21,4 @@ conversation identity. Applications own Page access tokens, outbound Graph
 clients, tools, dispatch policy, and deduplication.
 
 See the prepared package docs or
-<https://flueframework.com/docs/guide/channels/messenger/>.
+<https://flueframework.com/docs/ecosystem/channels/messenger/>.

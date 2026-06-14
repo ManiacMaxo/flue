@@ -224,7 +224,7 @@ app.route('/', flue());
 export default app;
 ```
 
-Your application chooses the agent instance before dispatching the event. `dispatch(...)` accepts it for asynchronous processing rather than waiting for an agent response. See [Channels](/docs/guide/channels/) for first-party provider packages, Chat SDK, and custom ingress.
+Your application chooses the agent instance before dispatching the event. `dispatch(...)` accepts it for asynchronous processing rather than waiting for an agent response. See [Channels](/docs/ecosystem/channels/) for first-party provider packages, Chat SDK, and custom ingress.
 
 ## Next steps
 
@@ -233,5 +233,5 @@ Your application chooses the agent instance before dispatching the event. `dispa
 - [Subagents](/docs/guide/subagents/) — delegate focused work to specialist profiles.
 - [Routing](/docs/guide/routing/) — expose agent HTTP surfaces inside an authenticated application.
 - [Workflows](/docs/guide/workflows/) — run single-use or background agent work.
-- [Channels](/docs/guide/channels/) — deliver provider events through first-party packages, Chat SDK, or custom routes.
+- [Channels](/docs/ecosystem/channels/) — deliver provider events through first-party packages, Chat SDK, or custom routes.
 - [Observability](/docs/guide/observability/) — inspect agent activity.

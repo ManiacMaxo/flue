@@ -177,5 +177,5 @@ the stable space and thread names; `spaceType` is descriptive metadata.
 - `InvalidGoogleChatConversationKeyError`
 - `InvalidGoogleChatInputError`, with structured `field`
 
-See [Google Chat setup](/docs/guide/channels/google-chat/) for the project-owned
+See [Google Chat setup](/docs/ecosystem/channels/google-chat/) for the project-owned
 service-account Fetch client and optional Workspace Events composition.

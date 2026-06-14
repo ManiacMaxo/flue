@@ -240,6 +240,6 @@ concerns.
 Crypto. The verification path executes in Node and workerd.
 
 See
-[Salesforce Marketing Cloud setup](/docs/guide/channels/salesforce-marketing-cloud/)
+[Salesforce Marketing Cloud setup](/docs/ecosystem/channels/salesforce-marketing-cloud/)
 for callback verification, a tenant-bound Fetch client, tool binding, and
 Node/workerd testing guidance.

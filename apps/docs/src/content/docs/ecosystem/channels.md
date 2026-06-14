@@ -68,23 +68,23 @@ For another provider, start from its documentation:
 flue add https://provider.example/webhooks --category channel --print | codex
 ```
 
-See the provider guides for [GitHub](/docs/guide/channels/github/),
-[Stripe](/docs/guide/channels/stripe/),
-[Notion](/docs/guide/channels/notion/),
-[Resend](/docs/guide/channels/resend/),
-[Shopify](/docs/guide/channels/shopify/),
-[Intercom](/docs/guide/channels/intercom/),
-[Zendesk](/docs/guide/channels/zendesk/),
-[Salesforce Marketing Cloud](/docs/guide/channels/salesforce-marketing-cloud/),
-[Slack](/docs/guide/channels/slack/),
-[Discord](/docs/guide/channels/discord/),
-[Microsoft Teams](/docs/guide/channels/teams/),
-[Google Chat](/docs/guide/channels/google-chat/),
-[Linear](/docs/guide/channels/linear/),
-[Telegram](/docs/guide/channels/telegram/),
-[WhatsApp](/docs/guide/channels/whatsapp/),
-[Twilio](/docs/guide/channels/twilio/),
-[Facebook Messenger](/docs/guide/channels/messenger/), or
+See the provider guides for [GitHub](/docs/ecosystem/channels/github/),
+[Stripe](/docs/ecosystem/channels/stripe/),
+[Notion](/docs/ecosystem/channels/notion/),
+[Resend](/docs/ecosystem/channels/resend/),
+[Shopify](/docs/ecosystem/channels/shopify/),
+[Intercom](/docs/ecosystem/channels/intercom/),
+[Zendesk](/docs/ecosystem/channels/zendesk/),
+[Salesforce Marketing Cloud](/docs/ecosystem/channels/salesforce-marketing-cloud/),
+[Slack](/docs/ecosystem/channels/slack/),
+[Discord](/docs/ecosystem/channels/discord/),
+[Microsoft Teams](/docs/ecosystem/channels/teams/),
+[Google Chat](/docs/ecosystem/channels/google-chat/),
+[Linear](/docs/ecosystem/channels/linear/),
+[Telegram](/docs/ecosystem/channels/telegram/),
+[WhatsApp](/docs/ecosystem/channels/whatsapp/),
+[Twilio](/docs/ecosystem/channels/twilio/),
+[Facebook Messenger](/docs/ecosystem/channels/messenger/), or
 [build a custom channel](/docs/guide/build-your-own-channel/).
 
 ## File-based routing

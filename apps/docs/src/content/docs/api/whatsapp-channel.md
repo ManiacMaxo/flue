@@ -150,5 +150,5 @@ include participant phone and BSUID fields.
 - `InvalidWhatsAppConversationKeyError`
 - `InvalidWhatsAppInputError`, with structured `field`
 
-See [WhatsApp setup](/docs/guide/channels/whatsapp/) for Meta configuration and
+See [WhatsApp setup](/docs/ecosystem/channels/whatsapp/) for Meta configuration and
 project-owned client composition.

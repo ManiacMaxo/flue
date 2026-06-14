@@ -206,5 +206,5 @@ declaration-only and add no Node or React runtime code to a Worker bundle. The
 official client and verification path execute in Node and workerd without
 `nodejs_compat`.
 
-See [Resend setup](/docs/guide/channels/resend/) for the project-owned client,
+See [Resend setup](/docs/ecosystem/channels/resend/) for the project-owned client,
 message retrieval, delivery handling, and offline testing guidance.

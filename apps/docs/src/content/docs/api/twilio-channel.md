@@ -163,5 +163,5 @@ type TwilioConversationRef =
 - `InvalidTwilioConversationKeyError`
 - `InvalidTwilioInputError`, with structured `field`
 
-See [Twilio setup](/docs/guide/channels/twilio/) for webhook configuration and
+See [Twilio setup](/docs/ecosystem/channels/twilio/) for webhook configuration and
 project-owned Fetch composition.

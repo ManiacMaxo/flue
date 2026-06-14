@@ -34,7 +34,7 @@ Organize supporting application code however you prefer inside `src/`. The files
 | `cloudflare.ts` | Optional Cloudflare-only module for Worker exports and non-HTTP handlers.             | [Cloudflare](/docs/ecosystem/deploy/cloudflare/#extending-the-worker) |
 | `agents/`       | Addressable agents that can receive continuing interactions over time.                | [Agents](/docs/guide/building-agents/)                                |
 | `workflows/`    | Finite operations that receive input and return a result.                             | [Workflows](/docs/guide/workflows/)                                   |
-| `channels/`     | Verified provider HTTP ingress discovered by filename.                                | [Channels](/docs/guide/channels/)                                     |
+| `channels/`     | Verified provider HTTP ingress discovered by filename.                                | [Channels](/docs/ecosystem/channels/)                                     |
 
 ### `app.ts`
 
@@ -75,7 +75,7 @@ Nested files are ordinary support modules and are not discovered as channels.
 Every route has a provider-owned non-empty suffix such as `/webhook`, `/events`,
 or `/interactions`; `/channels/github` itself is not an endpoint.
 
-For more information, see [Channels](/docs/guide/channels/).
+For more information, see [Channels](/docs/ecosystem/channels/).
 
 ## Source directory
 

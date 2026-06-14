@@ -149,5 +149,5 @@ id.
 - `InvalidLinearConversationKeyError`
 - `InvalidLinearInputError`, with structured `field`
 
-See [Linear setup](/docs/guide/channels/linear/) for webhook and official SDK
+See [Linear setup](/docs/ecosystem/channels/linear/) for webhook and official SDK
 composition.

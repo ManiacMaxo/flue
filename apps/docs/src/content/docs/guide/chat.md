@@ -6,7 +6,7 @@ description: Connect Chat SDK adapters and chat-side state to continuing Flue ag
 [Chat SDK](https://chat-sdk.dev/docs) provides a cross-platform conversation
 model, provider adapters, and chat-side state management. Use it when those
 abstractions fit better than Flue's provider-specific
-[first-party channels](/docs/guide/channels/).
+[first-party channels](/docs/ecosystem/channels/).
 
 Your application still owns the Flue boundary:
 
@@ -133,5 +133,5 @@ persistent adapter when chat-side subscriptions or coordination must survive
 restarts or multiple application instances.
 
 See the [Chat SDK documentation](https://chat-sdk.dev/docs) for supported
-adapters and state backends. See [Channels](/docs/guide/channels/) for
+adapters and state backends. See [Channels](/docs/ecosystem/channels/) for
 first-party provider integrations or a custom Fetch-based channel.

@@ -218,6 +218,6 @@ workflows, outbound clients, and tools remain application concerns.
 `@flue/intercom` depends only on Hono and standards-based Web Crypto. It does
 not depend on `intercom-client` or `@flue/runtime`.
 
-See [Intercom setup](/docs/guide/channels/intercom/) for official client
+See [Intercom setup](/docs/ecosystem/channels/intercom/) for official client
 composition, API version and region selection, application-owned tools, and
 Node/workerd testing guidance.

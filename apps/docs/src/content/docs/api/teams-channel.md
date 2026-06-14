@@ -149,5 +149,5 @@ tenant identity is invalid. Discovery failures return `503`.
 - `InvalidTeamsConversationKeyError`
 - `InvalidTeamsInputError`, with structured `field`
 
-See [Microsoft Teams setup](/docs/guide/channels/teams/) for the project-owned
+See [Microsoft Teams setup](/docs/ecosystem/channels/teams/) for the project-owned
 Fetch client and application tool composition.

@@ -18,4 +18,4 @@ response handling, and canonical conversation identity. Applications own the
 bot token, outbound Bot API client, tools, dispatch policy, and update-id
 deduplication.
 
-See the prepared package docs or <https://flueframework.com/docs/guide/channels/telegram/>.
+See the prepared package docs or <https://flueframework.com/docs/ecosystem/channels/telegram/>.

@@ -133,5 +133,5 @@ not include thread identity.
 - `InvalidTelegramConversationKeyError`
 - `InvalidTelegramInputError`, with structured `field`
 
-See [Telegram setup](/docs/guide/channels/telegram/) for webhook and grammY
+See [Telegram setup](/docs/ecosystem/channels/telegram/) for webhook and grammY
 composition.

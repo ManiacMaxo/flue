@@ -25,4 +25,4 @@ conversation identity. Applications own credentials, outbound Fetch clients,
 tools, dispatch policy, and deduplication.
 
 See the prepared package docs or
-<https://flueframework.com/docs/guide/channels/twilio/>.
+<https://flueframework.com/docs/ecosystem/channels/twilio/>.

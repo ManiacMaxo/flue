@@ -199,5 +199,5 @@ Conversation keys are canonical identifiers, not authorization capabilities.
 Requests outside Slack's five-minute timestamp window are rejected. The package
 rejects org-wide installations and does not deduplicate Events API retries.
 
-See [Slack setup](/docs/guide/channels/slack/) for composition with the Slack
+See [Slack setup](/docs/ecosystem/channels/slack/) for composition with the Slack
 Web API and application-owned tools.

@@ -227,6 +227,6 @@ identifiers, not authorization capabilities.
 Webhook subscription creation, OAuth, installation and token storage,
 resource-fetching policy, and outbound API tools remain application concerns.
 
-See [Notion setup](/docs/guide/channels/notion/) for initial verification,
+See [Notion setup](/docs/ecosystem/channels/notion/) for initial verification,
 official client composition, application-owned page identity, and Cloudflare
 runtime notes.

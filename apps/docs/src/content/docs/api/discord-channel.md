@@ -146,5 +146,5 @@ Conversation keys are canonical identifiers, not authorization capabilities.
 The package does not apply an invented timestamp freshness window or
 deduplicate interaction ids.
 
-See [Discord setup](/docs/guide/channels/discord/) for composition with
+See [Discord setup](/docs/ecosystem/channels/discord/) for composition with
 `@discordjs/rest` and application-owned tools.
