@@ -13,7 +13,7 @@ export const channel = createSalesforceMarketingCloudChannel({
   // Path: /channels/salesforce-marketing-cloud/events
   events({ batch }) {
     for (const event of batch.events) {
-      console.log(event.eventCategoryType, event.timestampUTC, event.raw);
+      console.log(event.eventCategoryType, event.timestampUTC, event.info);
     }
   },
 });
@@ -23,19 +23,24 @@ Place this export in `channels/salesforce-marketing-cloud.ts`. Flue discovers
 it and serves `POST /channels/salesforce-marketing-cloud/events` relative to
 the `flue()` mount.
 
-Signed notifications require `x-sfmc-ens-signature`, a base64 HMAC-SHA256
-digest over the exact request bytes. `signatureKey` is the opaque callback key
-used directly as UTF-8 HMAC material; do not base64-decode it. Verification
-happens before UTF-8 decoding or JSON parsing.
+`signatureKey` is required. Signed notifications require `x-sfmc-ens-signature`,
+a base64 HMAC-SHA256 digest over the exact request bytes. `signatureKey` is the
+opaque callback key used directly as UTF-8 HMAC material; do not base64-decode
+it. Verification happens before UTF-8 decoding or JSON parsing.
 
-The callback receives an ordered, nonempty batch of at most 1000 events.
-Common validation requires a nonempty `eventCategoryType` and nonnegative
-safe-integer `timestampUTC`. `compositeId`, `mid`, `eid`, and `info` are
-optional and event-family dependent. Each event preserves the complete
-provider object in `raw`; optional fields with family-specific shapes remain
-there even when they are not projected onto the normalized event. The batch
-exposes the exact decoded `rawBody`. ENS has no universal delivery or
-conversation id; `compositeId` is deprecated for transactional email.
+The callback receives an ordered, nonempty batch of at most 1000 events. Each
+event is passed through with Marketing Cloud's own field names and nesting —
+there is no `raw` wrapper and no field projection. Ingress requires only a
+nonempty `eventCategoryType`; every other field, including `timestampUTC`, is
+forwarded exactly as ENS delivered it. The modeled `composite`
+(`{ jobId, batchId, listId, … }`), `definitionKey`, and `definitionId` fields
+appear on the email send and engagement families that carry them, `info` holds
+the family-specific details, and `mid`/`eid` arrive as `number` on some families
+and `string` on others. An open index signature forwards any authenticated field
+this type does not model, so narrow on `eventCategoryType` and read the family
+fields you expect. The batch also exposes the exact decoded `rawBody`. ENS has no
+universal delivery or conversation id; `compositeId` is deprecated for
+transactional email.
 
 An optional `verification` handler enables the unsigned callback setup shape
 containing exactly `callbackId` and `verificationKey`. The application owns
@@ -45,9 +50,12 @@ are rejected.
 
 Returning no value or a JSON-compatible value produces `200`. A returned Hono
 or Fetch `Response` passes through unchanged. ENS acknowledges only statuses
-`200` through `204`. Complete processing defaults to a 2500 ms deadline and
-cannot be configured higher; channel failures and timeouts return `500`.
+`200` through `204`; channel failures and non-serializable results return `500`.
 
-ENS delivery is at least once and retries can continue for up to seven days.
-Deduplication, persistence, family-specific validation, outbound API clients,
-and agent routing remain application-owned.
+Flue imposes no route timeout: the handler is awaited and its result serialized.
+The only ENS deadline is at setup — the unsigned verification POST must be
+answered `200` within 30 seconds or callback creation fails. Because ENS delivers
+at least once and retries unacknowledged batches for up to seven days, admit
+durable work quickly (dispatch, then return) and make non-idempotent processing
+idempotent. Deduplication, persistence, family-specific validation, outbound API
+clients, and agent routing remain application-owned.

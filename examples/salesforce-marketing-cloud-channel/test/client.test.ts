@@ -75,17 +75,11 @@ describe('SalesforceMarketingCloudClient', () => {
 			timestampUTC: 1781399400123,
 			mid: 510021,
 			eid: '620031',
-			raw: {
-				eventCategoryType: 'EngagementEvents.EmailOpen',
-				timestampUTC: 1781399400123,
-				mid: 510021,
-				eid: '620031',
-				composite: {
-					jobId: '730041',
-					batchId: '12',
-					listId: '440051',
-					subscriberId: '880061',
-				},
+			composite: {
+				jobId: '730041',
+				batchId: '12',
+				listId: '440051',
+				subscriberId: '880061',
 			},
 		};
 

@@ -11,7 +11,7 @@ const SIGNATURE_KEY = 'V27FXfqI3DnhfQW1bhFDeJixpt8eDAY5R24UJI3cK6M=';
 const CALLBACK_ID = '65b885ab-c2b4-46fe-85d0-d6cb8be8057d';
 
 describe('createSalesforceMarketingCloudChannel()', () => {
-	it('delivers an ordered typed batch when the exact request bytes are signed', async () => {
+	it('delivers an ordered native batch when the exact request bytes are signed', async () => {
 		const events = vi.fn();
 		const app = channelApp(
 			createSalesforceMarketingCloudChannel({
@@ -48,14 +48,17 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 					},
 					{
 						eventCategoryType: 'EngagementEvents.EmailOpen',
-						raw: { providerAdded: 'preserved' },
+						timestampUTC: 1781397000456,
+						info: { ipAddress: '192.0.2.42' },
+						providerAdded: 'preserved',
 					},
 				],
 			},
 		});
+		expect(events.mock.calls[0]?.[0].batch.events[0]).not.toHaveProperty('raw');
 	});
 
-	it('accepts documented ENS event-family differences without erasing provider fields', async () => {
+	it('forwards documented ENS event-family differences without reshaping provider fields', async () => {
 		const events = vi.fn();
 		const app = channelApp(
 			createSalesforceMarketingCloudChannel({
@@ -87,26 +90,26 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 		const response = await app.request(request(body, await sign(body)));
 
 		expect(response.status).toBe(200);
-		expect(events.mock.calls[0]?.[0].batch.events).toMatchObject([
+		expect(events.mock.calls[0]?.[0].batch.events).toEqual([
 			{
 				eventCategoryType: 'AutomationEvents.AutomationInstanceStarted',
+				timestampUTC: 1781397100000,
 				mid: 412001,
-				raw: {
-					automationInstanceId: 'instance-27',
-				},
+				eid: 78002,
+				automationId: 'automation-19',
+				automationInstanceId: 'instance-27',
+				automationName: 'Nightly audience refresh',
 			},
 			{
 				eventCategoryType: 'TransactionalSendEvents.WhatsAppSent',
+				timestampUTC: 1781397100300,
 				mid: '412001',
 				eid: '78002',
-				raw: {
-					channelId: 'whatsapp-channel-6',
-					messageKey: 'message-wa-8',
-				},
+				channelId: 'whatsapp-channel-6',
+				to: '15555550123',
+				messageKey: 'message-wa-8',
 			},
 		]);
-		expect(events.mock.calls[0]?.[0].batch.events[0]?.compositeId).toBeUndefined();
-		expect(events.mock.calls[0]?.[0].batch.events[1]?.info).toBeUndefined();
 	});
 
 	it('handles only the exact unsigned callback verification payload', async () => {
@@ -200,7 +203,7 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 		expect(events).not.toHaveBeenCalled();
 	});
 
-	it('accepts the maximum ENS batch and preserves unrecognized optional fields only in raw', async () => {
+	it('accepts the maximum ENS batch and forwards unmodeled optional fields unchanged', async () => {
 		const events = vi.fn();
 		const app = channelApp(
 			createSalesforceMarketingCloudChannel({
@@ -222,76 +225,44 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 				timestampUTC: 1781397251000,
 			},
 		]);
-		const malformedOptionalFields = [
+		const unmodeledOptionalFields = [
 			{ eventCategoryType: 'FutureEvents.Composite', timestampUTC: 1, compositeId: '' },
 			{ eventCategoryType: 'FutureEvents.Mid', timestampUTC: 1, mid: 0 },
 			{ eventCategoryType: 'FutureEvents.Eid', timestampUTC: 1, eid: [] },
 			{ eventCategoryType: 'FutureEvents.Info', timestampUTC: 1, info: [] },
+			// timestampUTC is not validated: families may omit it or send a
+			// non-integer representation, and it forwards unchanged either way.
+			{ eventCategoryType: 'FutureEvents.NoTimestamp', other: true },
+			{ eventCategoryType: 'FutureEvents.StringTimestamp', timestampUTC: '2026-06-13T00:00:00Z' },
 		];
 
 		const responses = [
 			await app.request(request(maximumBatch, await sign(maximumBatch))),
 			await app.request(request(oversizedBatch, await sign(oversizedBatch))),
 		];
-		for (const event of malformedOptionalFields) {
+		for (const event of unmodeledOptionalFields) {
 			const body = JSON.stringify([event]);
 			responses.push(await app.request(request(body, await sign(body))));
 		}
 
-		expect(responses.map((response) => response.status)).toEqual([200, 400, 200, 200, 200, 200]);
-		expect(events).toHaveBeenCalledTimes(5);
-		expect(events.mock.calls[0]?.[0].batch.events).toHaveLength(1000);
-		expect(
-			events.mock.calls.slice(1).map(([input]) => {
-				const event = input.batch.events[0];
-				return {
-					compositeId: event?.compositeId,
-					mid: event?.mid,
-					eid: event?.eid,
-					info: event?.info,
-					raw: event?.raw,
-				};
-			}),
-		).toEqual([
-			{
-				compositeId: undefined,
-				mid: undefined,
-				eid: undefined,
-				info: undefined,
-				raw: malformedOptionalFields[0],
-			},
-			{
-				compositeId: undefined,
-				mid: undefined,
-				eid: undefined,
-				info: undefined,
-				raw: malformedOptionalFields[1],
-			},
-			{
-				compositeId: undefined,
-				mid: undefined,
-				eid: undefined,
-				info: undefined,
-				raw: malformedOptionalFields[2],
-			},
-			{
-				compositeId: undefined,
-				mid: undefined,
-				eid: undefined,
-				info: undefined,
-				raw: malformedOptionalFields[3],
-			},
+		expect(responses.map((response) => response.status)).toEqual([
+			200, 400, 200, 200, 200, 200, 200, 200,
 		]);
+		expect(events).toHaveBeenCalledTimes(7);
+		expect(events.mock.calls[0]?.[0].batch.events).toHaveLength(1000);
+		expect(events.mock.calls.slice(1).map(([input]) => input.batch.events[0])).toEqual(
+			unmodeledOptionalFields,
+		);
 	});
 
-	it('rejects signed events when no callback signature key is configured', async () => {
+	it('requires a callback signature key at construction', () => {
 		const events = vi.fn();
-		const app = channelApp(createSalesforceMarketingCloudChannel({ events }));
-		const body = eventBatch();
 
-		const response = await app.request(request(body, await sign(body)));
-
-		expect(response.status).toBe(401);
+		expect(() =>
+			createSalesforceMarketingCloudChannel(
+				{ events } as unknown as Parameters<typeof createSalesforceMarketingCloudChannel>[0],
+			),
+		).toThrow('signatureKey must be a non-empty string');
 		expect(events).not.toHaveBeenCalled();
 	});
 
@@ -391,41 +362,6 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 		expect(responses[2]?.headers.get('x-result')).toBe('custom');
 	});
 
-	it('returns a retryable failure when processing or the handler exceeds the deadline', async () => {
-		const beforeHandler = vi.fn();
-		const delayedBodyApp = channelApp(
-			createSalesforceMarketingCloudChannel({
-				signatureKey: SIGNATURE_KEY,
-				handlerTimeoutMs: 60,
-				events: beforeHandler,
-			}),
-		);
-		const slowHandler = vi.fn(
-			() =>
-				new Promise<undefined>((resolve) => {
-					setTimeout(() => resolve(undefined), 90);
-				}),
-		);
-		const slowHandlerApp = channelApp(
-			createSalesforceMarketingCloudChannel({
-				signatureKey: SIGNATURE_KEY,
-				handlerTimeoutMs: 60,
-				events: slowHandler,
-			}),
-		);
-		const body = eventBatch();
-
-		const delayedBody = await delayedBodyApp.request(
-			delayedStreamingRequest(body, await sign(body), 80),
-		);
-		const delayedHandler = await slowHandlerApp.request(request(body, await sign(body)));
-
-		expect([delayedBody.status, delayedHandler.status]).toEqual([500, 500]);
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(beforeHandler).not.toHaveBeenCalled();
-		expect(slowHandler).toHaveBeenCalledOnce();
-	});
-
 	it('publishes one fixed POST events route and preserves Hono environment types', () => {
 		type Bindings = { SALESFORCE_MARKETING_CLOUD_SIGNATURE_KEY: string };
 		type Variables = { requestId: string };
@@ -450,25 +386,21 @@ describe('createSalesforceMarketingCloudChannel()', () => {
 				signatureKey: '',
 				events() {},
 			}),
-		).toThrow('signatureKey must be non-empty');
+		).toThrow('signatureKey must be a non-empty string');
 		expect(() =>
 			createSalesforceMarketingCloudChannel({
+				signatureKey: SIGNATURE_KEY,
 				callbackId: ' callback-id ',
 				events() {},
 			}),
 		).toThrow('callbackId must be a non-empty trimmed string');
 		expect(() =>
 			createSalesforceMarketingCloudChannel({
+				signatureKey: SIGNATURE_KEY,
 				bodyLimit: 0,
 				events() {},
 			}),
 		).toThrow('bodyLimit must be a positive integer');
-		expect(() =>
-			createSalesforceMarketingCloudChannel({
-				handlerTimeoutMs: 2501,
-				events() {},
-			}),
-		).toThrow('handlerTimeoutMs must be between 1 and 2500');
 	});
 });
 
@@ -508,27 +440,6 @@ function streamingRequest(body: string, signature: string): Request {
 		start(controller) {
 			controller.enqueue(bytes.slice(0, 80));
 			controller.enqueue(bytes.slice(80));
-			controller.close();
-		},
-	});
-	return new Request('https://example.test/events', {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			'x-sfmc-ens-signature': signature,
-		},
-		body: stream,
-		duplex: 'half',
-	} as RequestInit);
-}
-
-function delayedStreamingRequest(body: string, signature: string, delayMs: number): Request {
-	const bytes = encoder.encode(body);
-	const stream = new ReadableStream<Uint8Array>({
-		async start(controller) {
-			controller.enqueue(bytes.slice(0, 20));
-			await new Promise((resolve) => setTimeout(resolve, delayMs));
-			controller.enqueue(bytes.slice(20));
 			controller.close();
 		},
 	});

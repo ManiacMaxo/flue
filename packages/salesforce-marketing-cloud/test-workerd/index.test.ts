@@ -39,6 +39,10 @@ describe('@flue/salesforce-marketing-cloud workerd ingress', () => {
 			events: [
 				{
 					eventCategoryType: 'EngagementEvents.EmailClick',
+					timestampUTC: 1781398000123,
+					compositeId: 'job-17.3.81',
+					mid: 51009,
+					eid: 62008,
 					info: { url: 'https://example.test/pricing' },
 				},
 			],
@@ -83,8 +87,8 @@ describe('@flue/salesforce-marketing-cloud workerd ingress', () => {
 		expect([challengeResponse.status, eventResponse.status]).toEqual([200, 200]);
 		expect(verification).toHaveBeenCalledOnce();
 		expect(events.mock.calls[0]?.[0].batch.events).toMatchObject([
-			{ raw: { automationId: 'automation-worker-3' } },
-			{ mid: '51009', eid: '62008', raw: { to: '15555550124' } },
+			{ eventCategoryType: 'AutomationEvents.AutomationInstanceCompleted', automationId: 'automation-worker-3' },
+			{ eventCategoryType: 'TransactionalSendEvents.WhatsAppDelivered', mid: '51009', eid: '62008', to: '15555550124' },
 		]);
 	});
 

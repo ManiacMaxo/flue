@@ -12,11 +12,11 @@ Import from `@flue/salesforce-marketing-cloud`.
 export {
   createSalesforceMarketingCloudChannel,
   type ChannelRoute,
-  type JsonObject,
   type JsonValue,
   type SalesforceMarketingCloudBatch,
   type SalesforceMarketingCloudChannel,
   type SalesforceMarketingCloudChannelOptions,
+  type SalesforceMarketingCloudComposite,
   type SalesforceMarketingCloudEvent,
   type SalesforceMarketingCloudEventsHandlerInput,
   type SalesforceMarketingCloudHandlerResult,
@@ -39,10 +39,9 @@ Creates one Marketing Cloud Engagement Event Notification Service channel.
 
 ```ts
 interface SalesforceMarketingCloudChannelOptions<E extends Env = Env> {
-  signatureKey?: string;
+  signatureKey: string;
   callbackId?: string;
   bodyLimit?: number;
-  handlerTimeoutMs?: number;
   verification?(input: SalesforceMarketingCloudVerificationHandlerInput<E>): void | Promise<void>;
   events(
     input: SalesforceMarketingCloudEventsHandlerInput<E>,
@@ -50,19 +49,16 @@ interface SalesforceMarketingCloudChannelOptions<E extends Env = Env> {
 }
 ```
 
-| Field              | Description                                                                 |
-| ------------------ | --------------------------------------------------------------------------- |
-| `signatureKey`     | Opaque callback HMAC key. Used directly as UTF-8; it is not base64-decoded. |
-| `callbackId`       | Optional expected id for unsigned callback verification.                    |
-| `bodyLimit`        | Maximum request-body size in bytes. Defaults to 1 MiB.                      |
-| `handlerTimeoutMs` | Complete route deadline. Defaults to 2500 ms; maximum 2500 ms.              |
-| `verification`     | Optional handler enabling the unsigned setup challenge.                     |
-| `events`           | Receives every authenticated, structurally valid ENS batch.                 |
+| Field          | Description                                                                 |
+| -------------- | --------------------------------------------------------------------------- |
+| `signatureKey` | Required opaque callback HMAC key. Used directly as UTF-8; not base64-decoded. |
+| `callbackId`   | Optional expected id for unsigned callback verification.                    |
+| `bodyLimit`    | Maximum request-body size in bytes. Defaults to 1 MiB.                      |
+| `verification` | Optional handler enabling the unsigned setup challenge.                     |
+| `events`       | Receives every authenticated, structurally valid ENS batch.                 |
 
-`signatureKey`, when provided, must be nonempty. Signed requests receive `401`
-when no key is configured. `callbackId` must be a nonempty trimmed string.
-`bodyLimit` must be a positive safe integer. `handlerTimeoutMs` must be a safe
-integer from 1 through 2500.
+`signatureKey` is required and must be a nonempty string. `callbackId` must be a
+nonempty trimmed string. `bodyLimit` must be a positive safe integer.
 
 ## Routes
 
@@ -91,7 +87,7 @@ interface SalesforceMarketingCloudEventsHandlerInput<E extends Env = Env> {
 ```
 
 `c` is the authentic Hono context. `events` runs only after content type, body
-limit, exact-body HMAC, UTF-8, JSON, batch, and common event validation pass.
+limit, exact-body HMAC, UTF-8, JSON, and batch-shape validation pass.
 
 ## `SalesforceMarketingCloudBatch`
 
@@ -108,38 +104,54 @@ signature verification.
 
 ## `SalesforceMarketingCloudEvent`
 
+Events are passed through as Marketing Cloud delivers them, with the provider's
+own field names and nesting. There is no `raw` wrapper and no field projection.
+
 ```ts
+interface SalesforceMarketingCloudComposite {
+  jobId?: string;
+  batchId?: string;
+  listId?: string;
+  [key: string]: unknown;
+}
+
 interface SalesforceMarketingCloudEvent {
   eventCategoryType: string;
   timestampUTC: number;
   compositeId?: string;
+  composite?: SalesforceMarketingCloudComposite;
+  definitionKey?: string;
+  definitionId?: string;
   mid?: number | string;
   eid?: number | string;
-  info?: JsonObject;
-  raw: JsonObject;
+  info?: { [key: string]: unknown };
+  [key: string]: unknown;
 }
 ```
 
-| Field               | Constraint or meaning                                                      |
-| ------------------- | -------------------------------------------------------------------------- |
-| `eventCategoryType` | Nonempty open ENS event taxonomy string.                                   |
-| `timestampUTC`      | Nonnegative safe-integer provider UTC epoch timestamp.                     |
-| `compositeId`       | Optional family-dependent tracking id; deprecated for transactional email. |
-| `mid`               | Optional positive safe integer or nonempty string business-unit id.        |
-| `eid`               | Optional positive safe integer or nonempty string enterprise id.           |
-| `info`              | Optional family-dependent JSON object.                                     |
-| `raw`               | Complete parsed provider event, including unnormalized future fields.      |
+| Field               | Constraint or meaning                                                       |
+| ------------------- | --------------------------------------------------------------------------- |
+| `eventCategoryType` | Nonempty open ENS event taxonomy string. The only field ingress validates.  |
+| `timestampUTC`      | Provider UTC epoch timestamp in milliseconds. Forwarded as delivered; not validated. |
+| `compositeId`       | Optional flattened tracking id; deprecated for transactional email.         |
+| `composite`         | Optional broken-down tracking id present on email families.                 |
+| `definitionKey`     | Optional Send Definition customer key (transactional sent events).          |
+| `definitionId`      | Optional Send Definition id (transactional sent events).                    |
+| `mid`               | Optional business-unit id. Delivered as `number` on some families, `string` on others. |
+| `eid`               | Optional enterprise id. Delivered as `number` on some families, `string` on others. |
+| `info`              | Optional family-specific details object.                                    |
+| `[key: string]`     | Any authenticated field this type does not model, forwarded unchanged.      |
 
-The package validates only common ENS fields. Event families can place useful
-data outside `info`, omit any optional field, give an optional field a
-family-specific shape, or add future fields. An optional field is projected
-onto the normalized event only when it matches the type above; the complete
-value remains in `raw`. Applications must validate every family-specific field
-they consume.
+Ingress validates only that each event is a JSON object carrying a nonempty
+`eventCategoryType`; one malformed item does not reject the whole batch beyond
+that. Every other field — including `timestampUTC`, whose representation varies
+across families — is forwarded exactly as ENS delivered it. The open index
+signature carries fields outside the modeled set, so narrow on
+`eventCategoryType` and validate every family-specific field you consume.
 
 ENS does not provide a universal delivery id, resource id, actor id, or
 conversation id. The package does not construct canonical identity from these
-optional fields.
+fields.
 
 ## Verification handler input
 
@@ -205,24 +217,15 @@ Returning nothing produces an empty `200`. A JSON-compatible value becomes a
 JSON response with status `200`. A normal Hono or Fetch `Response` passes
 through unchanged.
 
-A thrown handler, unsupported result, or complete-route timeout produces an
-empty `500`. ENS acknowledges only statuses `200` through `204`; a passed
-through status outside that range is not an acknowledgment.
+A thrown handler or unsupported (non-serializable) result produces an empty
+`500`. ENS acknowledges only statuses `200` through `204`; a passed-through
+status outside that range is not an acknowledgment.
 
-`handlerTimeoutMs` covers body receipt, verification, parsing, and the
-application handler. If processing exhausts the deadline before a handler
-starts, the handler is not invoked. Timed-out work already in progress is not
-cancelled and may continue after the `500` response.
-
-## JSON types
-
-```ts
-type JsonObject = { [key: string]: JsonValue };
-```
-
-Provider objects and handler JSON results accept finite numbers only. Objects
-must be ordinary JSON objects; unsupported or cyclic handler values produce
-`500`.
+Flue imposes no route timeout. The handler is awaited and its result serialized.
+The only ENS deadline is at setup: the unsigned verification POST must be
+answered `200` within 30 seconds or callback creation fails. Because delivery is
+at least once with retries for up to seven days, admit durable work quickly —
+dispatch, then return — rather than blocking the handler on slow work.
 
 ## Delivery and application boundary
 

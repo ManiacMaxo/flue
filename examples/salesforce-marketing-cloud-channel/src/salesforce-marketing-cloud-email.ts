@@ -19,7 +19,7 @@ export function emailRefFromEvent(
 	if (!isNonEmptyTrimmedString(callbackId)) return undefined;
 	const mid = decimalId(event.mid);
 	const eid = decimalId(event.eid);
-	const composite = event.raw.composite;
+	const composite = event.composite;
 	if (!mid || !eid || !isRecord(composite)) return undefined;
 	if (
 		!isPositiveDecimal(composite.jobId) ||

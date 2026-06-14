@@ -10,9 +10,6 @@ export type JsonValue =
 	| JsonValue[]
 	| { [key: string]: JsonValue };
 
-/** JSON object used for provider-native Marketing Cloud fields. */
-export type JsonObject = { [key: string]: JsonValue };
-
 /** Fixed route declaration consumed by Flue channel discovery. */
 export interface ChannelRoute<E extends Env = Env> {
 	readonly method: string;
@@ -29,31 +26,51 @@ export interface SalesforceMarketingCloudVerification {
 }
 
 /**
- * One verified Marketing Cloud Engagement event.
+ * Broken-down composite tracking id present on transactional send and
+ * engagement email families. Marketing Cloud delivers these as strings.
+ */
+export interface SalesforceMarketingCloudComposite {
+	jobId?: string;
+	batchId?: string;
+	listId?: string;
+	[key: string]: unknown;
+}
+
+/**
+ * One provider-native Marketing Cloud Engagement ENS event, passed through
+ * with Marketing Cloud's own field names and nesting.
  *
- * ENS event families do not share a closed schema. The durable common fields
- * are normalized and the complete provider object remains available as `raw`.
+ * ENS event families do not share a closed schema: `eventCategoryType` is an
+ * open taxonomy (`EngagementEvents.EmailOpen`, `TransactionalSendEvents.EmailSent`,
+ * `AutomationEvents.*`, …) and the family-specific fields live in `info`.
+ * Authenticated fields that this type does not model are forwarded unchanged,
+ * so narrow on `eventCategoryType` and read the family fields you expect.
  */
 export interface SalesforceMarketingCloudEvent {
 	/** Open provider event taxonomy, such as `EngagementEvents.EmailOpen`. */
 	eventCategoryType: string;
-	/** Provider UTC epoch timestamp. */
+	/** Provider UTC epoch timestamp, in milliseconds. */
 	timestampUTC: number;
-	/** Deprecated tracking id present on some event families. */
+	/** Deprecated flattened tracking id present on some event families. */
 	compositeId?: string;
-	/** Marketing Cloud business-unit id when supplied by the event family. */
+	/** Broken-down tracking id present on email families. */
+	composite?: SalesforceMarketingCloudComposite;
+	/** Send Definition customer key (transactional sent events only). */
+	definitionKey?: string;
+	/** Send Definition id (transactional sent events only). */
+	definitionId?: string;
+	/** Marketing Cloud business-unit id. Some event families deliver it as a string. */
 	mid?: number | string;
-	/** Marketing Cloud enterprise id when supplied by the event family. */
+	/** Marketing Cloud enterprise id. Some event families deliver it as a string. */
 	eid?: number | string;
-	/** Event-specific details when the provider family uses an `info` object. */
-	info?: JsonObject;
-	/** Complete parsed provider event, including future fields. */
-	raw: JsonObject;
+	/** Event-family-specific details. */
+	info?: { [key: string]: unknown };
+	[key: string]: unknown;
 }
 
 /** One authenticated, ordered ENS delivery batch. */
 export interface SalesforceMarketingCloudBatch {
-	/** Events in provider delivery order. */
+	/** Provider-native events in delivery order. */
 	events: SalesforceMarketingCloudEvent[];
 	/** Exact UTF-8 body after successful signature verification. */
 	rawBody: string;
@@ -76,8 +93,9 @@ export interface SalesforceMarketingCloudEventsHandlerInput<E extends Env = Env>
 type SalesforceMarketingCloudHandlerValue = undefined | JsonValue | Response;
 
 /**
- * Returning no value or JSON responds with `200`. A returned `Response`
- * passes through. ENS acknowledges only statuses `200` through `204`.
+ * Returning no value or a JSON-compatible value responds with `200`. A returned
+ * `Response` passes through. ENS treats any status outside `200`–`204` as a
+ * delivery failure and retries.
  */
 export type SalesforceMarketingCloudHandlerResult =
 	| SalesforceMarketingCloudHandlerValue
@@ -88,20 +106,13 @@ export interface SalesforceMarketingCloudChannelOptions<E extends Env = Env> {
 	/**
 	 * Callback-specific signature key returned once during ENS callback
 	 * creation. Marketing Cloud uses this opaque string directly as the HMAC
-	 * key; only the signature header is base64-decoded.
+	 * key; only the signature header is base64-decoded. Required.
 	 */
-	signatureKey?: string;
+	signatureKey: string;
 	/** Optional callback-id restriction for the unsigned setup challenge. */
 	callbackId?: string;
 	/** Maximum request-body size in bytes. Defaults to 1 MiB. */
 	bodyLimit?: number;
-	/**
-	 * Complete route deadline. Defaults to and may not exceed 2500ms, leaving
-	 * time before ENS's three-second delivery timeout.
-	 *
-	 * Timed-out work may continue after the failure response.
-	 */
-	handlerTimeoutMs?: number;
 	/**
 	 * Optional setup-only handler for the unsigned callback-verification
 	 * challenge. Unsigned requests are rejected when this is omitted. Flue
@@ -124,7 +135,10 @@ export interface SalesforceMarketingCloudChannel<E extends Env = Env> {
  * Creates one Marketing Cloud Engagement Event Notification Service route.
  *
  * The route is fixed at `POST /events`. Callback verification is an unsigned
- * setup handshake; event batches require `x-sfmc-ens-signature`.
+ * setup handshake; event batches require `x-sfmc-ens-signature`. Marketing
+ * Cloud expects a prompt acknowledgement, so admit durable work quickly
+ * instead of blocking on slow operations before returning, and rely on
+ * idempotency because ENS delivers at least once.
  */
 export function createSalesforceMarketingCloudChannel<E extends Env = Env>(
 	options: SalesforceMarketingCloudChannelOptions<E>,
@@ -145,11 +159,8 @@ function validateOptions<E extends Env>(options: SalesforceMarketingCloudChannel
 	if (!options || typeof options !== 'object') {
 		throw new TypeError('createSalesforceMarketingCloudChannel() requires an options object.');
 	}
-	if (
-		options.signatureKey !== undefined &&
-		(typeof options.signatureKey !== 'string' || options.signatureKey.length === 0)
-	) {
-		throw new TypeError('Salesforce Marketing Cloud signatureKey must be non-empty.');
+	if (typeof options.signatureKey !== 'string' || options.signatureKey.length === 0) {
+		throw new TypeError('Salesforce Marketing Cloud signatureKey must be a non-empty string.');
 	}
 	if (
 		options.callbackId !== undefined &&

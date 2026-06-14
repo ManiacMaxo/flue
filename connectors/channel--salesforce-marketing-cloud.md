@@ -23,9 +23,9 @@ Install `@flue/salesforce-marketing-cloud`. Do not install
 `@salesforce/core`: ingress and the narrow REST operation in this recipe use
 standard Fetch and Web Crypto in Node and Cloudflare Workers.
 
-Flue owns exact-body signature verification, body and batch limits, common
-event validation, response serialization, and the complete route deadline.
-The project owns callback registration, `/platform/v1/ens-verify`, OAuth,
+Flue owns exact-body signature verification, body and batch limits, minimal
+common-field validation, and response serialization. The project owns callback
+registration, `/platform/v1/ens-verify`, OAuth,
 token storage and refresh, subscription lifecycle, event-family validation,
 deduplication, persistence, agent routing policy, and every outbound
 operation.
@@ -323,7 +323,7 @@ test it only through injected fake Fetch.
 
 Create `<source-dir>/salesforce-marketing-cloud-email.ts` for the selected
 email families. Validate `mid`, `eid`, and the family-specific fields under
-`event.raw.composite`, then serialize those values with `callbackId` into a
+`event.composite`, then serialize those values with `callbackId` into a
 canonical local agent id. Provide matching functions such as:
 
 ```ts
@@ -386,12 +386,14 @@ before UTF-8 decoding or JSON parsing. The configured `signatureKey` is used
 directly as UTF-8 key material.
 
 Each signed payload is an ordered, nonempty JSON array with at most 1000
-events. Every event requires a nonempty `eventCategoryType` and a nonnegative
-safe-integer `timestampUTC`. `compositeId`, `mid`, `eid`, and `info` are
-optional and vary by event family. The normalized event preserves the complete
-provider object in `raw`; optional fields are projected only when they match
-their documented common types. The batch also exposes the exact decoded
-`rawBody`.
+events. Ingress requires only a nonempty `eventCategoryType` on each event — a
+single item without it is the only thing that fails the batch on event shape.
+Every other field — `timestampUTC`, `compositeId`, `composite`,
+`definitionKey`, `definitionId`, `mid`, `eid`, `info`, and any future field —
+is forwarded exactly as Marketing Cloud delivered it, with the provider's own
+names and nesting (`timestampUTC` is the provider UTC epoch in milliseconds and
+is not validated). Narrow on `eventCategoryType` and read the family fields you
+expect. The batch also exposes the exact decoded `rawBody`.
 
 There is no common ENS delivery id, resource id, actor id, or conversation id.
 Validate and compose application identity from the documented fields of each
@@ -401,14 +403,15 @@ subscribed event family.
 
 Returning nothing produces an empty `200`. A JSON-compatible value produces a
 JSON `200`. A normal Hono or Fetch `Response` passes through unchanged. ENS
-acknowledges only statuses `200` through `204`, so use a passthrough response
-outside that range only when redelivery is intentional.
+treats any status outside `200` through `204` as a delivery failure and
+retries, so use a passthrough response outside that range only when redelivery
+is intentional. A thrown callback or a non-serializable result returns `500`.
 
-The complete route deadline defaults to 2500 ms and cannot exceed 2500 ms. It
-includes body receipt, signature verification, parsing, setup verification,
-and application code. A thrown callback, unsupported result, or timeout
-returns `500`. If body processing exhausts the deadline, application code is
-not started. Work already started may continue after a timeout response.
+Marketing Cloud expects a prompt acknowledgement: it fails callback creation
+if the verification POST is not answered with `200` within 30 seconds, and it
+retries deliveries that are not acknowledged quickly. Admit durable work fast —
+dispatch to an agent or enqueue, then return — instead of blocking on slow
+operations before responding. Flue does not impose its own route timeout.
 
 ENS delivery is at least once and retries can continue for up to seven days.
 The channel does not deduplicate. Persist a family-appropriate application key
@@ -432,12 +435,12 @@ then base64-encode only the digest. Cover:
 - unsigned rejection when the verification handler is absent;
 - callback-id mismatch;
 - ordered batches of 1 and 1000 events, plus empty and oversized batches;
-- required common fields and optional family-dependent fields;
-- complete `raw` preservation and `compositeId` absence;
+- required common fields and verbatim forwarding of optional and unmodeled
+  family-dependent fields with their provider names and nesting;
 - malformed UTF-8 and JSON, media type, and declared and streamed body limits;
 - no-value, JSON, and normal `Response` results, including acknowledgment
   boundaries;
-- complete-route timeout and application failure.
+- application failure returning `500`.
 
 Test the exported client in Node and workerd with injected fail-closed Fetch.
 Assert:

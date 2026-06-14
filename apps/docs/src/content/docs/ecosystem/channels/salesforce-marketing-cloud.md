@@ -132,7 +132,7 @@ function requiredEnv(name: string): string {
 The route is fixed at `POST /events`. The example groups selected email event
 families while leaving the ENS taxonomy open. `emailRefFromEvent()` is
 application code that validates `mid`, `eid`, and the selected families'
-tracking fields under `event.raw.composite`. It normalizes those values with
+tracking fields under `event.composite`. It normalizes those values with
 `callbackId` into a local agent id and rejects malformed events.
 
 ENS supplies no universal delivery or conversation id. This email identity is
@@ -270,42 +270,52 @@ Signed notifications include:
 x-sfmc-ens-signature: <base64 HMAC-SHA256 digest>
 ```
 
-Marketing Cloud signs the exact body bytes. `signatureKey` is the opaque
-string returned during callback creation and is imported directly as UTF-8
-HMAC key material. Do not base64-decode it. Only the signature header is
+Marketing Cloud signs the exact body bytes. `signatureKey` is required: it is
+the opaque string returned during callback creation and is imported directly as
+UTF-8 HMAC key material. Do not base64-decode it. Only the signature header is
 base64-decoded.
 
-The signed payload is an ordered, nonempty array of at most 1000 events. Every
-event has:
+The signed payload is an ordered, nonempty array of at most 1000 events. Each
+event is passed through with Marketing Cloud's own field names and nesting —
+there is no `raw` wrapper and no field projection. Ingress requires only a
+nonempty `eventCategoryType` on each event; that one field is what makes a batch
+forwardable. Everything else is delivered as ENS sent it:
 
-- a nonempty `eventCategoryType`;
-- a nonnegative safe-integer `timestampUTC`;
-- optional family-dependent `compositeId`, `mid`, `eid`, and `info`;
-- `raw`, containing the complete provider object.
+- `timestampUTC`, the provider UTC epoch in milliseconds, forwarded unchanged
+  and not validated (some families omit it or use a different representation);
+- `composite` (`{ jobId, batchId, listId, … }`), `definitionKey`, and
+  `definitionId` on the email send and engagement families that carry them;
+- `info`, the family-specific details;
+- `mid` and `eid`, which arrive as `number` on some families and `string` on
+  others;
+- `compositeId`, the flattened tracking id, deprecated for transactional email.
 
-The batch also exposes `rawBody`, the exact UTF-8 body after signature
-verification. The package validates the common shape but does not close the
-event taxonomy or infer a universal resource, actor, delivery, or conversation
-identity. Optional fields are projected only when they match their documented
-common types; family-specific or future shapes remain available in `raw`.
+A top-level index signature forwards any authenticated field the modeled type
+does not name. The batch also exposes `rawBody`, the exact UTF-8 body after
+signature verification. The package does not close the event taxonomy or infer a
+universal resource, actor, delivery, or conversation identity. Narrow on
+`eventCategoryType` and validate every family-specific field you read.
 
 ## Responses and delivery
 
 Returning nothing produces an empty `200`. A JSON-compatible value becomes a
 JSON `200`. A normal Hono or Fetch `Response` passes through unchanged.
 
-ENS acknowledges only statuses `200` through `204`. Channel failures,
-unsupported return values, and timeouts produce `500`. A custom `Response`
+ENS acknowledges only statuses `200` through `204`. Channel failures and
+unsupported (non-serializable) return values produce `500`. A custom `Response`
 outside the acknowledgment range is passed through and can cause redelivery.
 
-`handlerTimeoutMs` defaults to 2500 and cannot exceed 2500. The deadline covers
-body receipt, signature verification, parsing, callback verification, and
-event handling. If body processing exhausts the deadline, application code is
-not started. Already-started work may continue after a timeout response.
+Flue imposes no route timeout. The handler is awaited and its result serialized.
+The only ENS deadline is at setup: the unsigned verification POST must be
+answered `200` within 30 seconds, or callback creation fails. Steady-state
+deliveries have no per-request deadline, but ENS retries any batch it does not
+see acknowledged.
 
 ENS delivery is at least once and retries may continue for up to seven days.
-The package does not deduplicate or persist events. Use application-owned
-durable state and a family-appropriate key before non-idempotent work.
+Admit durable work quickly — dispatch, then return — instead of blocking the
+handler on slow operations, and rely on idempotency. The package does not
+deduplicate or persist events; use application-owned durable state and a
+family-appropriate key before non-idempotent work.
 
 ## Cloudflare Workers
 
