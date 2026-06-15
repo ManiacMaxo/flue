@@ -1,18 +1,53 @@
 ---
 title: Braintrust
 description: Trace Flue workflows, model turns, tools, tasks, and compactions in Braintrust.
-package:
-  name: braintrust
-  href: https://www.npmjs.com/package/braintrust
 ---
 
 ## Quickstart
 
-Add Braintrust as an observability integration to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add tracing to an existing Flue project with the [Braintrust](https://www.braintrust.dev) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add tooling braintrust
 ```
+
+## Overview
+
+The Braintrust blueprint creates a source-root `braintrust.ts` and imports it once from `app.ts`. The generated module initializes Braintrust when an API key is available, then connects Braintrust's Flue observer to the runtime event stream:
+
+```ts title="src/braintrust.ts (abridged)"
+import { observe } from '@flue/runtime';
+import { braintrustFlueObserver, initLogger } from 'braintrust';
+
+if (process.env.BRAINTRUST_API_KEY) {
+  initLogger({
+    projectName: process.env.BRAINTRUST_PROJECT_NAME ?? 'Flue',
+    apiKey: process.env.BRAINTRUST_API_KEY,
+  });
+
+  observe((event, ctx) => braintrustFlueObserver(compatibleEvent(event), ctx), {
+    types: [
+      'run_start',
+      'run_resume',
+      'run_end',
+      'operation_start',
+      'operation',
+      'turn_request',
+      'turn',
+      'tool_start',
+      'tool',
+      'task_start',
+      'task',
+      'compaction_start',
+      'compaction',
+    ],
+  });
+}
+```
+
+The omitted `compatibleEvent(...)` helper translates current Flue tool and recovery events for the Braintrust version installed by the blueprint. The same module runs on Node.js and Cloudflare; unlike Sentry, Braintrust does not require a separate Cloudflare package or Durable Object wrapper.
+
+Once configured, workflow invocations appear as root traces with nested spans for operations, model turns, tools, delegated tasks, and compactions. Persistent-agent operations are traced without being represented as workflow runs.
 
 ## Configure
 

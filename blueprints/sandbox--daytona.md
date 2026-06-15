@@ -85,10 +85,9 @@ class DaytonaSandboxApi implements SandboxApi {
 		const info = await this.sandbox.fs.getFileDetails(path);
 		return {
 			isFile: !info.isDir,
-			isDirectory: info.isDir ?? false,
-			isSymbolicLink: false,
-			size: info.size ?? 0,
-			mtime: info.modTime ? new Date(info.modTime) : new Date(),
+			isDirectory: info.isDir,
+			size: info.size,
+			mtime: new Date(info.modTime),
 		};
 	}
 
@@ -120,13 +119,20 @@ class DaytonaSandboxApi implements SandboxApi {
 
 	async exec(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		const response = await this.sandbox.process.executeCommand(
 			command,
 			options?.cwd,
 			options?.env,
-			options?.timeout,
+			typeof options?.timeoutMs === 'number'
+				? Math.ceil(options.timeoutMs / 1000)
+				: undefined,
 		);
 		return {
 			stdout: response.result ?? '',

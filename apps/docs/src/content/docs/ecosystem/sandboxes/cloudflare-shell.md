@@ -7,11 +7,59 @@ The Cloudflare Shell adapter adapts an application-owned `@cloudflare/shell` `Wo
 
 ## Quickstart
 
-Add Cloudflare Shell as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable workspace sandbox capability to an existing Flue project with the [Cloudflare Shell](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox cloudflare-shell
 ```
+
+## Overview
+
+The blueprint installs `@cloudflare/shell` and `@cloudflare/codemode`, creates `<source-root>/sandboxes/cloudflare-shell.ts`, and adds a Worker Loader binding to Wrangler configuration. The generated adapter exports sandbox construction and default workspace helpers; its file API retries nested writes after recursively creating a missing parent directory.
+
+```ts title="<source-root>/sandboxes/cloudflare-shell.ts (abridged)"
+// flue-blueprint: sandbox/cloudflare-shell@1
+import { Workspace, WorkspaceFileSystem /* ... */ } from '@cloudflare/shell';
+import { stateTools } from '@cloudflare/shell/workers';
+import { DynamicWorkerExecutor, resolveProvider /* ... */ } from '@cloudflare/codemode';
+import type { SandboxFactory, SessionToolFactory /* ... */ } from '@flue/runtime';
+import { getCloudflareContext } from '@flue/runtime/cloudflare';
+
+export interface GetShellSandboxOptions {
+  workspace: Workspace;
+  loader: WorkerLoader;
+  executor?: Pick<DynamicWorkerExecutorOptions, 'timeout' | 'globalOutbound' | 'modules'>;
+}
+
+export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory {
+  /* ... generated workspace and Worker Loader validation ... */
+
+  const { workspace, loader, executor: executorOptions } = options;
+  const fs = new WorkspaceFileSystem(workspace);
+  const executor = new DynamicWorkerExecutor({
+    loader,
+    ...executorOptions,
+  });
+  const stateProvider = resolveProvider(stateTools(workspace));
+  const toolFactory: SessionToolFactory = () => [createCodeTool(executor, stateProvider)];
+
+  return {
+    async createSessionEnv() {
+      return createWorkspaceSessionEnv(workspace, fs, '/');
+    },
+    tools: toolFactory,
+  };
+}
+
+/* ... generated workspace session environment and code tool implementation ... */
+
+export function getDefaultWorkspace(): Workspace {
+  const { storage } = getCloudflareContext();
+  return new Workspace({ sql: storage.sql });
+}
+```
+
+Create a workspace, then pass it with the `worker_loaders` binding to `getShellSandbox(...)`. Agents receive durable file operations and the isolated JavaScript `code` tool; they do not receive Linux command execution. Application-specific data loading into the workspace remains application-owned.
 
 ## Configure
 
@@ -35,7 +83,5 @@ import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-sh
 Use Cloudflare Shell when files must be stored in a durable Workspace and agent work can be expressed through Workspace operations. It is not interchangeable with a container: `harness.shell(...)` and `session.shell(...)` do not provide Linux command execution through this adapter.
 
 If the workspace should survive later user interactions, associate it with a stable addressable agent instance. A workspace created inside one workflow invocation belongs to that invocation's owner rather than forming a shared cross-run workspace.
-
-You can hydrate content from R2 through the generated adapter helper before initializing the consuming harness. Hydration is a copy into Workspace, not a live-mounted bucket.
 
 See [Sandboxes](/docs/guide/sandboxes/) and [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).

@@ -76,9 +76,9 @@ import type { Sandbox as E2BSandbox } from 'e2b';
  * recursive/force flags — it just removes the path — so those options are
  * accepted for interface compatibility but ignored.
  *
- * `commands.run()` returns `{ stdout, stderr, exitCode }` directly. E2B
- * takes timeouts in milliseconds; Flue passes them in seconds (per the
- * adapter spec) so we multiply.
+ * `commands.run()` returns `{ stdout, stderr, exitCode }` directly. Both E2B
+ * and Flue express command timeouts in milliseconds, so the adapter forwards
+ * them unchanged.
  */
 class E2BSandboxApi implements SandboxApi {
 	constructor(private sandbox: E2BSandbox) {}
@@ -113,8 +113,6 @@ class E2BSandboxApi implements SandboxApi {
 			isFile: info.type === 'file',
 			isDirectory,
 			isSymbolicLink: typeof info.symlinkTarget === 'string' && info.symlinkTarget.length > 0,
-			size: info.size ?? 0,
-			mtime: info.modifiedTime ?? new Date(),
 		};
 	}
 
@@ -134,22 +132,24 @@ class E2BSandboxApi implements SandboxApi {
 	}
 
 	async rm(path: string, _options?: { recursive?: boolean; force?: boolean }): Promise<void> {
-		// E2B's remove() takes no flags — it removes whatever is at the
-		// path. The `force` option is implicitly satisfied (no error on
-		// missing paths is not guaranteed, but most callers wrap in a
-		// safety net anyway).
+		// E2B's remove() takes no flags, so recursive and force semantics
+		// remain provider-defined.
 		await this.sandbox.files.remove(path);
 	}
 
 	async exec(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		const result = await this.sandbox.commands.run(command, {
 			cwd: options?.cwd,
 			envs: options?.env,
-			// Flue passes timeout in seconds; E2B expects milliseconds.
-			timeoutMs: typeof options?.timeout === 'number' ? options.timeout * 1000 : undefined,
+			timeoutMs: options?.timeoutMs,
 		});
 		return {
 			stdout: result.stdout ?? '',

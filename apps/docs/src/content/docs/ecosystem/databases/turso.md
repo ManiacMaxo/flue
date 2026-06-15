@@ -8,11 +8,39 @@ package:
 
 ## Quickstart
 
-Add Turso as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, hosted database persistence to an existing Flue project with the [Turso](https://turso.tech) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database turso
 ```
+
+## Overview
+
+The Turso blueprint installs `@flue/libsql` and `@libsql/client`, creates a source-root `db.ts`, and updates existing environment documentation when the project has it. It uses the libSQL adapter with Turso's database URL and auth token:
+
+```ts title="src/db.ts (abridged)"
+import { libsql } from '@flue/libsql';
+import { createClient, type ResultSet } from '@libsql/client';
+
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN!,
+});
+
+const toRows = (rs: ResultSet) =>
+  rs.rows.map((row) => Object.fromEntries(rs.columns.map((column) => [column, row[column]])));
+
+export default libsql({
+  query: async (text, params = []) => toRows(await client.execute({ sql: text, args: params })),
+  transaction: async (fn) => {
+    const tx = await client.transaction('write');
+    // ...
+  },
+  close: () => client.close(),
+});
+```
+
+Flue discovers the adapter at build time and wires it into the generated Node server. On startup, it creates or verifies the required `flue_*` tables. Agent sessions, accepted submissions, and workflow-run records then survive process restarts in hosted Turso and can be shared across replicas; application business data remains application-owned. The blueprint applies only to Node targets because Cloudflare deployments use Durable Object SQLite instead.
 
 ## Configure
 

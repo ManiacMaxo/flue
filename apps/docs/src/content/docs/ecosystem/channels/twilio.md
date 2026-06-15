@@ -8,11 +8,51 @@ package:
 
 ## Quickstart
 
-Add Twilio as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified SMS and MMS webhook ingress and project-owned outbound messaging to an existing Flue project with the [Twilio](https://www.twilio.com/docs/messaging) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel twilio
 ```
+
+## Overview
+
+The Twilio blueprint installs `@flue/twilio`, creates a project-owned Fetch client at the source-root `twilio-client.ts`, and creates `channels/twilio.ts`. It also updates the selected agent to bind the generated reply tool to the verified conversation.
+
+```ts title="src/channels/twilio.ts (abridged)"
+import { createTwilioChannel } from '@flue/twilio';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { TwilioClient } from '../twilio-client.ts';
+
+export const client = new TwilioClient({
+  accountSid: process.env.TWILIO_ACCOUNT_SID!,
+  authToken: process.env.TWILIO_AUTH_TOKEN!,
+});
+
+export const channel = createTwilioChannel({
+  accountSid: process.env.TWILIO_ACCOUNT_SID!,
+  authToken: process.env.TWILIO_AUTH_TOKEN!,
+  webhookUrl: process.env.TWILIO_WEBHOOK_URL!,
+  destination: {
+    type: 'address',
+    address: process.env.TWILIO_PHONE_NUMBER!,
+  },
+  async webhook({ payload, conversation }) {
+    if (payload.OptOutType === 'STOP') return;
+    await dispatch(assistant, {
+      id: channel.conversationKey(conversation),
+      input: {
+        type: 'twilio.message',
+        messageSid: payload.MessageSid,
+        from: payload.From,
+        text: payload.Body,
+      },
+    });
+  },
+});
+```
+
+The abridged example omits the generated `postMessage()` tool and the Fetch client implementation. The full blueprint binds that tool to the agent's parsed conversation, so verified inbound messages reach the corresponding agent instance and replies are sent to the same participant. Cloudflare projects use the generated standards-based client instead of Twilio's Node-only helper; Messaging Service destinations and optional delivery-status callbacks are configured as secondary changes.
 
 ## Configure
 

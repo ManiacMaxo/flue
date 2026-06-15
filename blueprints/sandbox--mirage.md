@@ -140,17 +140,12 @@ class MirageSandboxApi implements SandboxApi {
 	async stat(path: string): Promise<FileStat> {
 		const s = await this.workspace.fs.stat(path);
 		// Mirage's FileStat: { name, size: number|null, modified: string|null,
-		// type: FileType|null }. FileType.DIRECTORY is the literal 'directory'.
-		const isDirectory = s.type === 'directory';
+		// type: FileType|null }.
 		return {
-			isFile: !isDirectory,
-			isDirectory,
-			isSymbolicLink: false, // Mirage doesn't model symlinks.
-			size: s.size ?? 0,
-			// Use Unix epoch as the "missing mtime" sentinel so callers
-			// comparing mtimes (e.g. cache layers) can't confuse it with
-			// a real recent modification.
-			mtime: s.modified ? new Date(s.modified) : new Date(0),
+			isFile: s.type === 'file',
+			isDirectory: s.type === 'directory',
+			...(s.size === null ? {} : { size: s.size }),
+			...(s.modified === null ? {} : { mtime: new Date(s.modified) }),
 		};
 	}
 
@@ -211,7 +206,7 @@ class MirageSandboxApi implements SandboxApi {
 		options?: {
 			cwd?: string;
 			env?: Record<string, string>;
-			timeout?: number;
+			timeoutMs?: number;
 			signal?: AbortSignal;
 		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -223,23 +218,21 @@ class MirageSandboxApi implements SandboxApi {
 		options?: {
 			cwd?: string;
 			env?: Record<string, string>;
-			timeout?: number;
+			timeoutMs?: number;
 			signal?: AbortSignal;
 		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		// Build the AbortSignal: prefer the caller's signal, fall back to a
 		// timeout-derived one, or compose both if both are set.
-		let signal: AbortSignal | undefined;
-		if (typeof options?.timeout === 'number' && options?.signal) {
-			signal = AbortSignal.any([
-				options.signal,
-				AbortSignal.timeout(options.timeout * 1000),
-			]);
-		} else if (typeof options?.timeout === 'number') {
-			signal = AbortSignal.timeout(options.timeout * 1000);
-		} else if (options?.signal) {
-			signal = options.signal;
-		}
+		const timeoutSignal =
+			typeof options?.timeoutMs === 'number'
+				? AbortSignal.timeout(options.timeoutMs)
+				: undefined;
+		const callerSignal = options?.signal;
+		const signal =
+			callerSignal && timeoutSignal
+				? AbortSignal.any([callerSignal, timeoutSignal])
+				: (callerSignal ?? timeoutSignal);
 
 		try {
 			const result = await this.workspace.execute(command, {
@@ -254,16 +247,17 @@ class MirageSandboxApi implements SandboxApi {
 				exitCode: result.exitCode,
 			};
 		} catch (err) {
-			// On timeout: synthesize a 124-shaped result (matches `timeout(1)`),
-			// matching what other Flue sandbox adapters return.
+			// If the caller's signal fired, rethrow so the host abort wins.
+			if (callerSignal?.aborted) throw err;
 			const isTimeout =
-				typeof options?.timeout === 'number' &&
-				err instanceof Error &&
-				(err.name === 'AbortError' || err.name === 'TimeoutError');
+				timeoutSignal?.aborted &&
+				(err === timeoutSignal.reason ||
+					(err instanceof Error &&
+						(err.name === 'AbortError' || err.name === 'TimeoutError')));
 			if (isTimeout) {
 				return {
 					stdout: '',
-					stderr: `[flue:mirage] Command timed out after ${options.timeout} seconds.`,
+					stderr: `[flue:mirage] Command timed out after ${options?.timeoutMs} milliseconds.`,
 					exitCode: 124,
 				};
 			}

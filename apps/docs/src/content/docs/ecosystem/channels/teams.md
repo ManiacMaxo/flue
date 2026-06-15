@@ -8,11 +8,48 @@ package:
 
 ## Quickstart
 
-Add Microsoft Teams as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add authenticated Microsoft Teams Bot Connector activities and project-owned outbound messaging to an existing Flue project with the [Microsoft Teams](https://www.microsoft.com/microsoft-teams) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel teams
 ```
+
+## Overview
+
+The blueprint installs `@flue/teams`, creates a source-root
+`lib/teams-client.ts` Fetch client and `channels/teams.ts` channel module, and
+modifies the selected agent to bind the generated message tool. The Fetch client
+handles OAuth token exchange and Bot Connector requests without adding
+Microsoft's Node-oriented hosting SDKs.
+
+```ts title="src/channels/teams.ts (abridged)"
+import { dispatch } from '@flue/runtime';
+import { createTeamsChannel } from '@flue/teams';
+import assistant from '../agents/assistant.ts';
+
+export const channel = createTeamsChannel({
+  appId: process.env.TEAMS_APP_ID!,
+  tenantId: process.env.TEAMS_TENANT_ID!,
+  async activities({ activity }) {
+    if (activity.type !== 'message' || !activity.text) return;
+    await dispatch(assistant, {
+      id: channel.conversationKey(channel.destination(activity)),
+      input: {
+        type: 'teams.message',
+        activityId: activity.id,
+        sender: activity.from,
+        text: activity.text,
+        entities: activity.entities,
+      },
+    });
+  },
+});
+```
+
+The abridged example omits the generated client and message tool. Once
+configured, a text activity continues the agent instance for its verified Teams
+conversation, and the bound tool can post a reply to the same Connector service
+URL and thread. The generated Fetch client runs on Node and Cloudflare Workers.
 
 ## Configure
 

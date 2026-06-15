@@ -8,11 +8,43 @@ package:
 
 ## Quickstart
 
-Add Valkey as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared state to an existing Flue project with the [Valkey](https://valkey.io) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database valkey
 ```
+
+## Overview
+
+The Valkey blueprint installs `@flue/redis` and the official Redis `redis`
+client, creates a `db.ts` in the project's source-root, and follows the
+project's existing secret convention for `VALKEY_URL`. It does not modify
+deployment configuration because persistence and recovery settings remain
+owned by the Valkey deployment.
+
+The primary generated adapter connects the client and translates Flue database
+operations into Redis-protocol commands supported by Valkey:
+
+```ts title="src/db.ts (abridged)"
+import { redis } from '@flue/redis';
+import { createClient } from 'redis';
+
+const client = createClient({ url: process.env.VALKEY_URL });
+await client.connect();
+
+export default redis({
+  command: (command, args = []) => client.sendCommand([command, ...args.map(String)]),
+  eval: (script, keys, args = []) => client.eval(script, {keys, arguments: args.map(String) }),
+  close: () => client.close(),
+});
+```
+
+This abridged excerpt omits the generated pipeline helper, which batches
+commands and rejects any `Error` result. Flue discovers the adapter during a
+Node build, checks and migrates its Valkey namespace at server startup, and
+persists agent sessions, accepted submissions, workflow runs, and event streams
+so that they survive Flue process restarts. Durability across Valkey server loss
+depends on the deployment's AOF or snapshot configuration.
 
 ## Configure
 

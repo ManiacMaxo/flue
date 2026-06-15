@@ -49,7 +49,6 @@ import {
 	type ResolvedProvider,
 } from '@cloudflare/codemode';
 import {
-	Type,
 	type FileStat,
 	type SandboxFactory,
 	type SessionEnv,
@@ -62,48 +61,6 @@ export interface GetShellSandboxOptions {
 	workspace: Workspace;
 	loader: WorkerLoader;
 	executor?: Pick<DynamicWorkerExecutorOptions, 'timeout' | 'globalOutbound' | 'modules'>;
-}
-
-export interface HydrateFromBucketOptions {
-	prefix?: string;
-}
-
-export async function hydrateFromBucket(
-	workspace: Workspace,
-	bucket: R2Bucket,
-	options?: HydrateFromBucketOptions,
-): Promise<void> {
-	const prefix = options?.prefix;
-	let cursor: string | undefined;
-
-	while (true) {
-		const listing = await bucket.list({ prefix, cursor });
-		for (const obj of listing.objects) {
-			const relativeKey = stripPrefix(obj.key, prefix);
-			if (relativeKey === '' || relativeKey.endsWith('/')) continue;
-			const body = await bucket.get(obj.key);
-			if (!body) continue;
-			await workspace.writeFileBytes(
-				absolutize(relativeKey),
-				new Uint8Array(await body.arrayBuffer()),
-			);
-		}
-
-		if (!listing.truncated) break;
-		if (!listing.cursor) {
-			throw new Error('[flue] R2 listing was truncated but did not include a cursor.');
-		}
-		cursor = listing.cursor;
-	}
-}
-
-function stripPrefix(key: string, prefix: string | undefined): string {
-	if (!prefix) return key;
-	return key.startsWith(prefix) ? key.slice(prefix.length) : key;
-}
-
-function absolutize(key: string): string {
-	return key.startsWith('/') ? key : `/${key}`;
 }
 
 export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory {
@@ -175,8 +132,20 @@ function createWorkspaceSessionEnv(
 		},
 		async writeFile(path: string, content: string | Uint8Array): Promise<void> {
 			const resolved = resolvePath(path);
-			if (typeof content === 'string') await workspace.writeFile(resolved, content);
-			else await workspace.writeFileBytes(resolved, content);
+			const write = async (): Promise<void> => {
+				if (typeof content === 'string') await workspace.writeFile(resolved, content);
+				else await workspace.writeFileBytes(resolved, content);
+			};
+			try {
+				await write();
+			} catch {
+				const parent = resolved.slice(0, resolved.lastIndexOf('/')) || '/';
+				try {
+					await fs.mkdir(parent, { recursive: true });
+				} catch {
+				}
+				await write();
+			}
 		},
 		async stat(path: string): Promise<FileStat> {
 			return adaptStat(await fs.stat(resolvePath(path)));
@@ -215,15 +184,20 @@ function adaptStat(s: CfFsStat): FileStat {
 	};
 }
 
-const CodeParams = Type.Object({
-	code: Type.String({
-		description:
-			'A single async arrow function with the signature `async () => { ... return result; }`. ' +
-			'Inside the body, call `state.*` to operate on the workspace (see the type declarations ' +
-			'below). The function executes in an isolated Worker — no network, no DOM, no imports. ' +
-			'Return whatever JSON-serializable value you want back; it is returned as the tool result.',
-	}),
-});
+const CodeParams = {
+	type: 'object',
+	properties: {
+		code: {
+			type: 'string',
+			description:
+				'A single async arrow function with the signature `async () => { ... return result; }`. ' +
+				'Inside the body, call `state.*` to operate on the workspace (see the type declarations ' +
+				'below). The function executes in an isolated Worker — no network, no DOM, no imports. ' +
+				'Return whatever JSON-serializable value you want back; it is returned as the tool result.',
+		},
+	},
+	required: ['code'],
+};
 
 function createCodeTool(
 	executor: DynamicWorkerExecutor,
@@ -330,11 +304,10 @@ JavaScript against the Workspace `state.*` API. Application code can still use
 `session.fs` and `harness.fs` against the same Workspace; `session.shell()` and
 `harness.shell()` throw.
 
-R2 hydration is an eager copy into the Workspace, not a live bucket mount.
-Callers should use a sentinel file, as in the example below, and treat the
-Workspace as the owner of mutations after hydration. If the user needs Linux
-commands, language toolchains, or R2 keys exposed as mounted filesystem paths,
-use `@cloudflare/sandbox` Containers with `mountBucket` instead.
+If the user needs Linux commands, language toolchains, or R2 keys exposed as
+mounted filesystem paths, use `@cloudflare/sandbox` Containers with
+`mountBucket` instead. Application-specific data loading into the Workspace
+belongs outside this adapter.
 
 ## Wiring it into a workflow
 
@@ -357,42 +330,6 @@ export async function run({ init, env }: FlueContext<unknown, Env>) {
   const harness = await init(agent);
   const session = await harness.session();
   return await session.prompt('Use the code tool to list the workspace root.');
-}
-```
-
-## Optional R2 hydration
-
-If the user wants bucket contents copied into the Workspace before the workflow
-runs, use the `hydrateFromBucket()` helper that this adapter file exports:
-
-```ts
-import { createAgent, type FlueContext, type WorkflowRouteHandler } from '@flue/runtime';
-import {
-  getDefaultWorkspace,
-  getShellSandbox,
-  hydrateFromBucket,
-} from '../sandboxes/cloudflare-shell';
-
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-interface Env {
-  KNOWLEDGE_BASE: R2Bucket;
-  LOADER: WorkerLoader;
-}
-
-export async function run({ init, env }: FlueContext<unknown, Env>) {
-  const workspace = getDefaultWorkspace();
-  if (!(await workspace.exists('/.hydrated'))) {
-    await hydrateFromBucket(workspace, env.KNOWLEDGE_BASE);
-    await workspace.writeFile('/.hydrated', new Date().toISOString());
-  }
-  const agent = createAgent(() => ({
-    sandbox: getShellSandbox({ workspace, loader: env.LOADER }),
-    model: 'cloudflare/@cf/moonshotai/kimi-k2.6',
-  }));
-  const harness = await init(agent);
-  const session = await harness.session();
-  return await session.prompt('Use the code tool to inspect the hydrated workspace.');
 }
 ```
 

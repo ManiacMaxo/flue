@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cloudflareSandbox, type CloudflareSandboxStub } from '../src/cloudflare/cf-sandbox.ts';
+import { type CloudflareSandboxStub, cloudflareSandbox } from '../src/cloudflare/cf-sandbox.ts';
 import {
 	getCloudflareContext,
 	getDurableObjectIdentity,
@@ -126,11 +126,13 @@ describe('cloudflareSandbox()', () => {
 			cwd: '/workspace/project',
 		}).createSessionEnv({ id: 'agent-1' });
 
+		const signal = new AbortController().signal;
 		await expect(
 			env.exec('pnpm test', {
 				cwd: '/workspace/check',
 				env: { NODE_ENV: 'test' },
 				timeoutMs: 12_000,
+				signal,
 			}),
 		).resolves.toEqual({ stdout: 'done', stderr: 'warning', exitCode: 3 });
 
@@ -138,6 +140,7 @@ describe('cloudflareSandbox()', () => {
 			cwd: '/workspace/check',
 			env: { NODE_ENV: 'test' },
 			timeout: 12_000,
+			signal,
 		});
 	});
 
@@ -212,7 +215,7 @@ describe('cloudflareSandbox()', () => {
 		);
 	});
 
-	it('rejects after execution when a signal-blind Cloudflare sandbox is aborted in flight', async () => {
+	it('forwards a signal and rejects when a Cloudflare sandbox is aborted in flight', async () => {
 		let markStarted: () => void = () => {};
 		const started = new Promise<void>((resolve) => {
 			markStarted = resolve;
@@ -244,6 +247,7 @@ describe('cloudflareSandbox()', () => {
 			cwd: '/workspace/project',
 			env: undefined,
 			timeout: undefined,
+			signal: controller.signal,
 		});
 	});
 });

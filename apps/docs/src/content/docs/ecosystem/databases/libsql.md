@@ -8,11 +8,36 @@ package:
 
 ## Quickstart
 
-Add libSQL as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable libSQL persistence to an existing Flue project with the [libSQL](https://github.com/tursodatabase/libsql) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database libsql
 ```
+
+## Overview
+
+The libSQL blueprint installs `@flue/libsql` and `@libsql/client`, creates a source-root `db.ts`, and updates existing environment documentation when the project has it. The generated adapter maps client result sets to plain objects and serializes operations so a local SQLite file does not receive overlapping writes from one process:
+
+```ts title="src/db.ts (abridged)"
+import { libsql } from '@flue/libsql';
+import { createClient, type ResultSet } from '@libsql/client';
+
+const client = createClient({ url: process.env.LIBSQL_URL! });
+
+export default libsql({
+  query: (text, params = []) => {
+    // await client.execute({ sql: text, args: params }))),
+    // ...
+  }
+  transaction: (fn) => {
+    // const tx = await client.transaction('write');
+    // ...
+  }
+  close: () => client.close(),
+});
+```
+
+Flue discovers the adapter at build time and wires it into the generated Node server. On startup, it creates or verifies the required `flue_*` tables. Agent sessions, accepted submissions, and workflow-run records then persist in a local SQLite file or self-hosted libSQL server according to `LIBSQL_URL`; application business data remains application-owned. Embedded replicas require additional `syncUrl` client configuration. The blueprint applies only to Node targets because Cloudflare deployments use Durable Object SQLite instead.
 
 ## Configure
 

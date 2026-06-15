@@ -8,11 +8,57 @@ package:
 
 ## Quickstart
 
-Add GitHub as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified webhook ingress and application-owned API behavior to an existing Flue project with the [GitHub](https://github.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel github
 ```
+
+## Overview
+
+The blueprint installs `@flue/github` and the official `@octokit/rest` SDK. It
+creates `<source-root>/channels/github.ts` with a named `channel`, a
+project-owned Octokit `client`, and an issue-comment tool, then wires that tool
+into an agent. Adapt the subscribed events, dispatched input, and tool to the
+application.
+
+```ts title="src/channels/github.ts (abridged)"
+import { Octokit } from '@octokit/rest';
+import { createGitHubChannel } from '@flue/github';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+
+export const client = new Octokit({ auth: process.env.GITHUB_TOKEN });
+
+export const channel = createGitHubChannel({
+  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
+  async webhook({ delivery }) {
+    if (delivery.name !== 'issue_comment' || delivery.payload.action !== 'created') return;
+    const { repository, issue, comment } = delivery.payload;
+    const issueRef = {
+      owner: repository.owner.login,
+      repo: repository.name,
+      issueNumber: issue.number,
+    };
+
+    await dispatch(assistant, {
+      id: channel.conversationKey(issueRef),
+      input: {
+        type: 'github.issue_comment.created',
+        deliveryId: delivery.deliveryId,
+        comment: { id: comment.id, body: comment.body },
+      },
+    });
+  },
+});
+```
+
+A newly created issue comment is admitted to the agent bound to that repository
+and issue; other verified deliveries receive an empty successful response. The
+full generated module also handles pull-request review comments and lets the
+bound agent post an issue or pull-request comment through Octokit. Cloudflare
+targets retain the project's credential convention and run Octokit's Fetch path
+under Flue's `nodejs_compat` configuration.
 
 ## Configure
 

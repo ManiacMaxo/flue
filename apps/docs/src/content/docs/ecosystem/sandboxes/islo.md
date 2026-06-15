@@ -8,11 +8,74 @@ The islo adapter adapts a named islo sandbox into Flue's sandbox interface by in
 
 ## Quickstart
 
-Add islo as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add named remote sandbox capability to an existing Flue project with the [islo](https://islo.dev) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox islo
 ```
+
+## Overview
+
+The islo blueprint creates `sandboxes/islo.ts` in your source-root without adding an npm dependency. The generated adapter uses Node's child-process API and expects an authenticated `islo` binary plus an application-managed sandbox name.
+
+```ts title="<source-root>/sandboxes/islo.ts (abridged)"
+// flue-blueprint: sandbox/islo@1
+import { spawn } from 'node:child_process';
+import { createSandboxSessionEnv } from '@flue/runtime';
+import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
+
+export interface IsloAdapterOptions {
+  cwd?: string;
+  cliPath?: string;
+}
+
+const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+class IsloSandboxApi implements SandboxApi {
+  constructor(
+    private name: string,
+    private cliPath: string,
+  ) {}
+
+  async exec(
+    command: string,
+    options?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const cd = options?.cwd ? `cd ${q(options.cwd)} && ` : '';
+    const envPrefix = options?.env
+      ? Object.entries(options.env)
+          .map(([k, v]) => `${k}=${q(v)}`)
+          .join(' ') + ' '
+      : '';
+    const tmo =
+      typeof options?.timeoutMs === 'number' ? `timeout ${options.timeoutMs / 1000} ` : '';
+    const remote = `${envPrefix}${tmo}bash -lc ${q(cd + command)}`;
+    const args = ['--output', 'json', 'use', this.name, '--', 'bash', '-lc', remote];
+
+    /* ... spawn the islo CLI and map its output and exit code ... */
+  }
+
+  /* ... generated file operations using quoted remote shell commands ... */
+}
+
+export function islo(name: string, options?: IsloAdapterOptions): SandboxFactory {
+  const cliPath = options?.cliPath ?? 'islo';
+  return {
+    async createSessionEnv(): Promise<SessionEnv> {
+      const sandboxCwd = options?.cwd ?? '/workspace';
+      const api = new IsloSandboxApi(name, cliPath);
+      return createSandboxSessionEnv(api, sandboxCwd);
+    },
+  };
+}
+```
+
+Pass a sandbox name to `islo(...)` and assign the returned factory to an agent's `sandbox` property. Flue resolves relative paths from `/workspace`; the adapter converts `timeoutMs` from milliseconds to seconds for GNU `timeout` inside the sandbox, while the CLI handles remote execution and file operations.
 
 ## Configure
 

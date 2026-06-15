@@ -34,10 +34,10 @@ runner you wrap around the Postgres driver the project chooses, so the project
 owns driver selection, pooling, TLS, and every connection option.
 
 Install `@flue/postgres` plus one Postgres driver. If the project already
-depends on a Postgres driver, reuse it. Otherwise pick the maintained driver
-that fits — common choices are [`postgres`](https://github.com/porsager/postgres)
-(porsager) and [`pg`](https://node-postgres.com/) (node-postgres). Ask the user
-if the choice is consequential for their deployment.
+depends on a Postgres driver, reuse it. Otherwise use
+[`pg`](https://node-postgres.com/) (node-postgres) and install the matching
+`@types/pg` development dependency. Ask the user before choosing a different
+driver when the choice is consequential for their deployment.
 
 ## Create `db.ts`
 
@@ -46,23 +46,6 @@ driver in the runner shape — `query` (a SQL string with numbered `$N`
 placeholders plus positional params, resolving to result rows), a `transaction`
 that runs its callback inside one transaction on a single connection, and
 `close`.
-
-Using the porsager `postgres` driver:
-
-```ts title="src/db.ts"
-// flue-blueprint: database/postgres@1
-import { postgres, type PostgresQuery } from '@flue/postgres';
-import sql from 'postgres';
-
-const db = sql(process.env.DATABASE_URL!);
-
-export default postgres({
-  query: (text, params) => db.unsafe(text, params),
-  transaction: <T>(fn: (tx: { query: PostgresQuery }) => Promise<T>) =>
-    db.begin((tx) => fn({ query: (text, params) => tx.unsafe(text, params) })) as Promise<T>,
-  close: () => db.end(),
-});
-```
 
 With `pg` (node-postgres), `transaction` must check out a single client and
 issue `BEGIN`/`COMMIT`/`ROLLBACK` itself — a pool cannot run a transaction

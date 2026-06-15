@@ -8,11 +8,58 @@ package:
 
 ## Quickstart
 
-Add Zendesk as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified event-subscription ingress and application-owned Ticketing API behavior to an existing Flue project with the [Zendesk](https://developer.zendesk.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel zendesk
 ```
+
+## Overview
+
+The blueprint installs `@flue/zendesk` and `lossless-json`. It creates a narrow
+Fetch client at `<source-root>/zendesk-client.ts` and
+`<source-root>/channels/zendesk.ts` with named `channel` and project-owned
+`client` exports, ticket identity handling, and a ticket-bound retrieval tool.
+It wires that tool into an agent and adds Node types only when the target needs
+them; no community Zendesk SDK is installed.
+
+```ts title="src/channels/zendesk.ts (abridged)"
+import { createZendeskChannel } from '@flue/zendesk';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { createZendeskClient } from '../zendesk-client.ts';
+
+export const client = createZendeskClient({
+  subdomain: process.env.ZENDESK_SUBDOMAIN!,
+  email: process.env.ZENDESK_EMAIL!,
+  apiToken: process.env.ZENDESK_API_TOKEN!,
+});
+
+export const channel = createZendeskChannel({
+  signingSecret: process.env.ZENDESK_WEBHOOK_SIGNING_SECRET!,
+  accountId: process.env.ZENDESK_ACCOUNT_ID!,
+  async webhook({ payload }) {
+    if (payload.type !== 'zen:event-type:ticket.created') return;
+    const ticketId = ticketIdFromEvent(payload.subject, payload.detail);
+    if (!ticketId) return;
+
+    await dispatch(assistant, {
+      id: channel.ticketKey({ accountId: payload.account_id, ticketId }),
+      input: { type: `zendesk.${payload.type}`, eventId: payload.id, ticketId },
+    });
+  },
+});
+```
+
+The abridged example omits the `ticketIdFromEvent()` helper; the complete helper
+appears in the channel module below.
+
+A matching ticket event is admitted to the agent bound to that account and
+ticket, while other verified events receive an empty successful response. The
+full generated module validates matching ticket identity in `subject` and
+`detail.id`, handles comment events, and lets the bound agent retrieve the
+current ticket through the project-owned client. That client preserves large
+Zendesk identifiers and runs in Node or Cloudflare Workers.
 
 ## Configure
 

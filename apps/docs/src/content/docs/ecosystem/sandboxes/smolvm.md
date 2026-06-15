@@ -8,11 +8,66 @@ The smolvm adapter adapts an initialized `Machine` from `smolvm-embedded` into F
 
 ## Quickstart
 
-Add smolvm as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add local microVM sandbox capability to an existing Flue project with the [smolvm](https://smolmachines.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox smolvm
 ```
+
+## Overview
+
+The blueprint installs `smolvm-embedded` when needed and creates `sandboxes/smolvm.ts` in your source-root. The generated adapter accepts an initialized local `Machine`; machine creation, connection, networking, shutdown, and deletion remain application-owned.
+
+```ts title="<source-root>/sandboxes/smolvm.ts (abridged)"
+// flue-blueprint: sandbox/smolvm@1
+import { createSandboxSessionEnv } from '@flue/runtime';
+import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
+import type { Machine } from 'smolvm-embedded';
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+class SmolvmSandboxApi implements SandboxApi {
+  constructor(private machine: Machine) {}
+
+  /* ... generated file operations using Machine methods and quoted POSIX commands ... */
+
+  async exec(
+    command: string,
+    options?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const result = await this.machine.exec(['sh', '-lc', command], {
+      workdir: options?.cwd,
+      env: options?.env,
+      timeout:
+        typeof options?.timeoutMs === 'number' ? Math.ceil(options.timeoutMs / 1000) : undefined,
+    });
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+    };
+  }
+}
+
+export function smolvm(machine: Machine): SandboxFactory {
+  return {
+    async createSessionEnv(): Promise<SessionEnv> {
+      const sandboxCwd = '/workspace';
+      const api = new SmolvmSandboxApi(machine);
+      return createSandboxSessionEnv(api, sandboxCwd);
+    },
+  };
+}
+```
+
+Pass an initialized smolvm `Machine` to `smolvm(...)` and assign the returned factory to an agent's `sandbox` property. Flue resolves relative paths from `/workspace`; commands run through `sh -lc`, and Flue's millisecond `timeoutMs` is rounded up to the whole seconds accepted by smolvm.
 
 ## Configure
 

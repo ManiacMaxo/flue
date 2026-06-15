@@ -553,7 +553,12 @@ export class ExeDevSandboxApi implements SandboxApi {
 
   async exec(
     command: string,
-    options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+    options?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     let cmd = command;
 
@@ -567,6 +572,8 @@ export class ExeDevSandboxApi implements SandboxApi {
       cmd = `cd '${shellEscape(options.cwd)}' && ${cmd}`;
     }
 
+    // ssh2 has no AbortSignal integration. The option is accepted for the
+    // SandboxApi shape; Flue's runtime enforces pre/post signal checks.
     return new Promise((resolve, reject) => {
       this.ssh.exec(cmd, {}, (err, stream) => {
         if (err) return reject(err);
@@ -583,15 +590,15 @@ export class ExeDevSandboxApi implements SandboxApi {
           resolve(result);
         };
 
-        if (options?.timeout) {
+        if (typeof options?.timeoutMs === "number") {
           timer = setTimeout(() => {
             stream.close();
             finish({
               stdout,
-              stderr: `${stderr}\n[flue:exedev] Command timed out after ${options.timeout} seconds.`,
+              stderr: `${stderr}\n[flue:exedev] Command timed out after ${options.timeoutMs} milliseconds.`,
               exitCode: 124,
             });
-          }, options.timeout * 1000);
+          }, options.timeoutMs);
         }
 
         stream.on("data", (data: Buffer) => {

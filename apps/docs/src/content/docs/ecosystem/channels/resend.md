@@ -8,11 +8,45 @@ package:
 
 ## Quickstart
 
-Add Resend as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified webhook ingress and application-owned email behavior to an existing Flue project with the [Resend](https://resend.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel resend
 ```
+
+## Overview
+
+The Resend blueprint installs `@flue/resend` and the official `resend` SDK, adds the SDK's declaration-only development dependencies, and creates `channels/resend.ts` in the source-root. It also updates the selected agent to bind a message-retrieval tool to the verified inbound email.
+
+```ts title="src/channels/resend.ts (abridged)"
+import { createResendChannel } from '@flue/resend';
+import { dispatch } from '@flue/runtime';
+import { Resend } from 'resend';
+import assistant from '../agents/assistant.ts';
+
+export const client = new Resend(process.env.RESEND_API_KEY!);
+
+export const channel = createResendChannel({
+  client,
+  webhookSecret: process.env.RESEND_WEBHOOK_SECRET!,
+  async webhook({ event, delivery }) {
+    if (event.type !== 'email.received') return;
+    await dispatch(assistant, {
+      id: emailInstanceId(event.data.email_id),
+      input: {
+        type: 'resend.email.received',
+        deliveryId: delivery.id,
+        emailId: event.data.email_id,
+        from: event.data.from,
+        to: event.data.to,
+        subject: event.data.subject,
+      },
+    });
+  },
+});
+```
+
+The abridged example omits the generated local email-id helpers and `retrieveReceivedEmail()` tool. The complete blueprint binds that tool in the agent module, so a verified `email.received` event starts a message-scoped agent instance that can retrieve the full email through the project-owned client. Receiving-domain setup, webhook registration, attachment retrieval, outbound mail, and reply policy remain application-owned.
 
 ## Configure
 

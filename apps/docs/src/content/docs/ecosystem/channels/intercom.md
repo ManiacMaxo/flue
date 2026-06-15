@@ -8,11 +8,48 @@ package:
 
 ## Quickstart
 
-Add Intercom as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified webhook ingress and application-owned API behavior to an existing Flue project with the [Intercom](https://developers.intercom.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel intercom
 ```
+
+## Overview
+
+The Intercom blueprint installs `@flue/intercom` and the official `intercom-client` SDK, creates a project-owned client factory at the source-root `intercom-client.ts`, and creates `channels/intercom.ts`. It also updates the selected agent to bind a conversation-retrieval tool to the verified workspace and conversation.
+
+```ts title="src/channels/intercom.ts (abridged)"
+import { createIntercomChannel, type IntercomConversationRef } from '@flue/intercom';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { createIntercomClient } from '../intercom-client.ts';
+
+export const client = createIntercomClient(process.env.INTERCOM_ACCESS_TOKEN!, { region: 'us' });
+
+export const channel = createIntercomChannel({
+  clientSecret: process.env.INTERCOM_CLIENT_SECRET!,
+  async webhook({ notification }) {
+    if (notification.topic !== 'conversation.user.replied') return;
+    const conversationId = conversationIdFromItem(notification.data.item);
+    if (!conversationId) return;
+
+    const conversation: IntercomConversationRef = {
+      workspaceId: notification.app_id,
+      conversationId,
+    };
+    await dispatch(assistant, {
+      id: channel.conversationKey(conversation),
+      input: {
+        type: 'intercom.conversation.user.replied',
+        notificationId: notification.id,
+        conversation: notification.data.item,
+      },
+    });
+  },
+});
+```
+
+The abridged example shows one dispatched topic and omits the generated environment, region, conversation-id, and retrieval-tool helpers. The complete generated module dispatches `conversation.user.created` and `conversation.user.replied`; other verified topics reach the callback and remain subject to application policy. It pins the SDK to its typed API version, selects the configured region, and binds the retrieval tool in the agent module, so dispatched notifications reach a workspace-scoped agent instance that can retrieve the current conversation without exposing workspace ids or credentials to the model.
 
 ## Configure
 

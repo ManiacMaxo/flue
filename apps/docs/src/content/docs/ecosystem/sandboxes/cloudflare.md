@@ -7,11 +7,34 @@ Cloudflare Sandbox uses `@cloudflare/sandbox` to provide a container-backed Linu
 
 ## Quickstart
 
-Add Cloudflare Sandbox as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add container-backed Linux sandbox capability to an existing Flue project with the [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox cloudflare
 ```
+
+## Overview
+
+Cloudflare Sandbox is a Cloudflare target integration rather than a generated adapter. In a Cloudflare-targeted project, the blueprint installs `@cloudflare/sandbox`; a workflow obtains the bound Durable Object with `getSandbox(...)`, wraps it with Flue's `cloudflareSandbox(...)`, and passes that sandbox factory to a created agent.
+
+```ts title="<source-root>/workflows/coding-agent.ts (excerpt)"
+import { createAgent, type FlueContext, type WorkflowRouteHandler } from '@flue/runtime';
+import { cloudflareSandbox } from '@flue/runtime/cloudflare';
+import { getSandbox } from '@cloudflare/sandbox';
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export async function run({ init, id, env, payload }: FlueContext<{ message: string }>) {
+  const sandbox = cloudflareSandbox(getSandbox(env.Sandbox, id));
+  const agent = createAgent(() => ({ sandbox, model: 'anthropic/claude-opus-4-7' }));
+  const harness = await init(agent);
+  const session = await harness.session();
+
+  return await session.prompt(payload.message);
+}
+```
+
+The blueprint also exports `Sandbox` from `<source-root>/cloudflare.ts`, adds its Durable Object binding, a new migration entry, and its container declaration to `wrangler.jsonc`, and creates a project-root `Dockerfile` whose image tag matches the installed package version. The resulting workflow runs agent shell and file operations in the container-backed sandbox identified by the workflow run id. A Node-targeted project must migrate to the Cloudflare target before using this integration.
 
 ## Configure
 

@@ -8,11 +8,38 @@ package:
 
 ## Quickstart
 
-Add MongoDB as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared state to an existing Flue project with the [MongoDB](https://www.mongodb.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database mongodb
 ```
+
+## Overview
+
+The MongoDB blueprint installs `@flue/mongodb` and the official `mongodb`
+driver, creates a complete `db.ts` runner in the project's source-root, and
+follows the project's existing secret convention for `MONGODB_URL` and
+`MONGODB_DATABASE`. The generated adapter connects the driver, selects the
+database, and passes a project-owned runner to `mongodb()`:
+
+```ts title="src/db.ts (abridged)"
+import { mongodb, type MongoOperations, type MongoRunner } from '@flue/mongodb';
+import { MongoClient } from 'mongodb';
+
+const client = new MongoClient(process.env.MONGODB_URL!);
+await client.connect();
+
+const db = client.db(process.env.MONGODB_DATABASE);
+const runner: MongoRunner = { /* ... */ };
+
+export default mongodb(runner);
+```
+
+The blueprint does not modify the MongoDB deployment, which must support
+transactions. Flue discovers the adapter during a Node build
+and persists agent sessions, accepted submissions, workflow runs, event
+streams, and image chunks so that state survives process restarts and can be
+shared across replicas. Application business data remains application-owned.
 
 ## Configure
 

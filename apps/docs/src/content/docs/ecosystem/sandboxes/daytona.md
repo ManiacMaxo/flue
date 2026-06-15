@@ -8,11 +8,44 @@ The Daytona adapter adapts an already-initialized Daytona sandbox from `@daytona
 
 ## Quickstart
 
-Add Daytona as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add provider-managed Linux sandbox capability to an existing Flue project with the [Daytona](https://daytona.io) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox daytona
 ```
+
+## Overview
+
+The blueprint installs `@daytona/sdk` when needed and creates `sandboxes/daytona.ts` in your source-root. That file adapts a Daytona sandbox that your application has already created; it does not choose its image, identity, retention, or cleanup policy.
+
+```ts title="<source-root>/sandboxes/daytona.ts (abridged)"
+// flue-blueprint: sandbox/daytona@1
+import { createSandboxSessionEnv } from '@flue/runtime';
+import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
+import type { Sandbox as DaytonaSandbox } from '@daytona/sdk';
+
+class DaytonaSandboxApi implements SandboxApi {
+  constructor(private sandbox: DaytonaSandbox) {}
+
+  /* Implements file reads, writes, stat, listing, existence, and mkdir with sandbox.fs. */
+
+  /* Implements rm() with sandbox.fs.deleteFile(), forwarding recursive support. */
+
+  /* Implements exec() with executeCommand(), rounding timeoutMs up to whole seconds. */
+}
+
+export function daytona(sandbox: DaytonaSandbox): SandboxFactory {
+  return {
+    async createSessionEnv(): Promise<SessionEnv> {
+      const sandboxCwd = (await sandbox.getWorkDir()) ?? '/home/daytona';
+      const api = new DaytonaSandboxApi(sandbox);
+      return createSandboxSessionEnv(api, sandboxCwd);
+    },
+  };
+}
+```
+
+Pass an initialized Daytona `Sandbox` to `daytona(...)`, then assign the returned factory to an agent's `sandbox` property. Flue uses the provider's working directory as the workspace root, exposes Daytona filesystem and process operations through the session, preserves Daytona's available file metadata, and rounds millisecond command deadlines up to the SDK's whole-second timeout; your application remains responsible for sandbox creation and lifecycle.
 
 ## Configure
 

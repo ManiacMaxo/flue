@@ -9,11 +9,63 @@ lastReviewedAt: 2026-06-14
 
 ## Quickstart
 
-Add Google Chat as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add authenticated interactions, optional Workspace Events, and project-owned outbound messaging to an existing Flue project with the [Google Chat](https://developers.google.com/workspace/chat) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel google-chat
 ```
+
+## Overview
+
+The blueprint installs `@flue/google-chat` and `jose`. It creates a narrow
+service-account Fetch client at `<source-root>/lib/google-chat-client.ts` and
+`<source-root>/channels/google-chat.ts` with named `channel`, project-owned
+`client`, and message-tool exports, then wires the tool into an agent. The
+primary generated path handles direct interactions; authenticated Pub/Sub push
+for Workspace Events is an optional section in the same channel module.
+
+```ts title="src/channels/google-chat.ts (abridged)"
+import { createGoogleChatChannel } from '@flue/google-chat';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { createGoogleChatClient } from '../lib/google-chat-client.ts';
+
+export const client = createGoogleChatClient({
+  clientEmail: process.env.GOOGLE_CHAT_CLIENT_EMAIL!,
+  privateKey: process.env.GOOGLE_CHAT_PRIVATE_KEY!,
+});
+
+export const channel = createGoogleChatChannel({
+  interactions: {
+    authentication: {
+      type: 'endpoint-url',
+      audience: process.env.GOOGLE_CHAT_APP_URL!,
+    },
+    async handler({ c, payload }) {
+      if (payload.type !== 'MESSAGE') return;
+      const ref = conversationFromPayload(payload);
+      if (!ref) return;
+
+      await dispatch(assistant, {
+        id: channel.conversationKey(ref),
+        input: { type: `google-chat.${payload.type}`, payload },
+      });
+      return c.body(null, 200);
+    },
+  },
+});
+```
+
+The abridged example omits the `conversationFromPayload()` helper; the complete
+helper appears in the interaction example below.
+
+An authenticated message is admitted to the agent bound to its Google Chat
+space and thread and acknowledged with `200`; other authenticated interactions receive an
+empty successful response. The full generated module validates thread and
+space identity and lets the bound agent post a reply through the project-owned
+client. Workspace Events add an authenticated `/events` route and preserve the
+Pub/Sub wrapper for application-owned decoding and deduplication. Both Node and
+Cloudflare targets use standards-based Fetch and Web Crypto.
 
 ## Configure
 

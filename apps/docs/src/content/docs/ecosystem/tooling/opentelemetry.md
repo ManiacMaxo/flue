@@ -12,11 +12,26 @@ See [Observability](/docs/guide/observability/) to inspect workflow runs, unders
 
 ## Quickstart
 
-Install the adapter and OpenTelemetry API alongside an SDK and exporter appropriate for your deployment target:
+Add [OpenTelemetry](https://opentelemetry.io) tracing to an existing Flue project by installing the adapter and API alongside an SDK and exporter for your deployment target:
 
 ```sh
 pnpm add @flue/opentelemetry @opentelemetry/api
 ```
+
+## Overview
+
+`@flue/opentelemetry` supplies an observer that converts Flue runtime events into OpenTelemetry spans. Register it once in your application entrypoint, after initializing an OpenTelemetry SDK and exporter:
+
+```ts title="src/app.ts (abridged)"
+import { createOpenTelemetryObserver, observedEventTypes } from '@flue/opentelemetry';
+import { observe } from '@flue/runtime';
+
+observe(createOpenTelemetryObserver(), {
+  types: observedEventTypes,
+});
+```
+
+The observer creates spans for workflow runs, finite agent operations, model turns, tools, delegated tasks, and compactions. It also attaches Flue logs to the nearest tracked span. The package does not choose or configure your OpenTelemetry SDK, exporter, sampling, credentials, or shutdown behavior.
 
 ## Configure
 
@@ -26,25 +41,7 @@ pnpm add @flue/opentelemetry @opentelemetry/api
 | OpenTelemetry exporter                       | **Required for span delivery** — Delivers spans to the selected observability backend.                                      |
 | Sampling, credentials, and shutdown behavior | **Application-specific** — Controls collection, authenticates delivery when needed, and flushes pending spans.              |
 
-Configure the SDK before registering the Flue observer once in your application entrypoint:
-
-```ts title="src/app.ts"
-import { createOpenTelemetryObserver, observedEventTypes } from '@flue/opentelemetry';
-import { observe } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
-import { Hono } from 'hono';
-
-observe(createOpenTelemetryObserver(), {
-  types: observedEventTypes,
-});
-
-const app = new Hono();
-app.route('/', flue());
-
-export default app;
-```
-
-The adapter uses `trace.getTracer('@flue/opentelemetry')` by default. Pass `{ tracer }` when the application already owns a configured tracer. `observedEventTypes` restricts delivery to events the adapter consumes, avoiding serialization work for high-frequency streaming events.
+Configure the SDK before the observer registration shown above. The adapter uses `trace.getTracer('@flue/opentelemetry')` by default; pass `{ tracer }` when the application already owns a configured tracer. `observedEventTypes` restricts delivery to events the adapter consumes, avoiding serialization work for high-frequency streaming events.
 
 ## What the adapter traces
 

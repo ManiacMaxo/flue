@@ -9,11 +9,48 @@ lastReviewedAt: 2026-06-13
 
 ## Quickstart
 
-Add Slack as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified HTTP ingress and application-owned Web API behavior to an existing Flue project with the [Slack](https://slack.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel slack
 ```
+
+## Overview
+
+The Slack blueprint installs `@flue/slack` and Slack's official `@slack/web-api` SDK, then creates `channels/slack.ts` in the source-root. It also updates the selected agent to bind the generated thread-reply tool to the verified Slack conversation.
+
+```ts title="src/channels/slack.ts (abridged)"
+import { dispatch } from '@flue/runtime';
+import { createSlackChannel } from '@flue/slack';
+import { WebClient } from '@slack/web-api';
+import assistant from '../agents/assistant.ts';
+
+export const client = new WebClient(process.env.SLACK_BOT_TOKEN);
+
+export const channel = createSlackChannel({
+  signingSecret: process.env.SLACK_SIGNING_SECRET!,
+  async events({ payload }) {
+    if (payload.type !== 'event_callback') return;
+    if (payload.event.type !== 'app_mention') return;
+
+    const event = payload.event;
+    await dispatch(assistant, {
+      id: channel.conversationKey({
+        teamId: payload.team_id,
+        channelId: event.channel,
+        threadTs: event.thread_ts ?? event.ts,
+      }),
+      input: {
+        type: 'slack.app_mention',
+        eventId: payload.event_id,
+        text: event.text,
+      },
+    });
+  },
+});
+```
+
+The abridged example omits the generated `replyInThread()` tool. The complete blueprint binds that tool in the agent module, so verified app mentions reach a thread-scoped agent instance and replies return to the same thread. Interactivity and slash-command callbacks are optional secondary additions: each callback publishes its corresponding route only when enabled.
 
 ## Configure
 

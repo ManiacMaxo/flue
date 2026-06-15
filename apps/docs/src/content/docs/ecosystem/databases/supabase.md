@@ -8,11 +8,44 @@ package:
 
 ## Quickstart
 
-Add Supabase as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared Postgres persistence to an existing Flue project with the [Supabase](https://supabase.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database supabase
 ```
+
+## Overview
+
+The Supabase blueprint installs `@flue/postgres` and `pg`, adds the matching
+`@types/pg` development dependency, and creates a transaction-safe `db.ts` in
+the project's source-root. It uses the project's existing secret convention and
+updates an existing environment example or environment documentation when one
+is present.
+
+The primary generated adapter uses one checked-out `pg` client for every query
+in a transaction:
+
+```ts title="src/db.ts (abridged)"
+import { postgres } from '@flue/postgres';
+import { Pool } from 'pg';
+
+const pool = new Pool({ connectionString: process.env.SUPABASE_DATABASE_URL });
+
+export default postgres({
+  query: async (text, params) => (await pool.query(text, params)).rows,
+  transaction: async (fn) => {
+    const client = await pool.connect();
+    // ...
+  },
+  close: () => pool.end(),
+});
+```
+
+Flue discovers the adapter during a Node build,
+runs its migrations at server startup, and persists agent sessions, accepted
+submissions, workflow runs, and event state in Supabase so that state survives
+process restarts and can be shared across replicas. Application business data
+remains application-owned.
 
 ## Configure
 

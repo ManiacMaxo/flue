@@ -396,7 +396,8 @@ describe('flue add', () => {
 		const postgres = await runCli(['add', 'database', 'postgres', '--print']);
 		assert.equal(postgres.code, 0);
 		assert.ok(postgres.stdout.includes('@flue/postgres'));
-		assert.ok(postgres.stdout.includes('PostgresQuery'));
+		assert.ok(postgres.stdout.includes("import { Pool } from 'pg'"));
+		assert.ok(postgres.stdout.includes('pool.connect()'));
 		assert.ok(postgres.stdout.includes('BEGIN'));
 		assert.ok(postgres.stdout.includes('ROLLBACK'));
 

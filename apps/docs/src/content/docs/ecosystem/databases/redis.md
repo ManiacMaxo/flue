@@ -8,11 +8,43 @@ package:
 
 ## Quickstart
 
-Add Redis as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared state to an existing Flue project with the [Redis](https://redis.io) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database redis
 ```
+
+## Overview
+
+The Redis blueprint installs `@flue/redis` and the official `redis` client,
+creates a `db.ts` in the project's source-root, and follows the project's
+existing secret convention for `REDIS_URL`. It does not modify deployment
+configuration because persistence and recovery settings remain owned by the
+Redis deployment.
+
+The primary generated adapter connects the client and translates Flue database
+operations into Redis commands:
+
+```ts title="src/db.ts (abridged)"
+import { redis } from '@flue/redis';
+import { createClient } from 'redis';
+
+const client = createClient({ url: process.env.REDIS_URL });
+await client.connect();
+
+export default redis({
+  command: (command, args = []) => client.sendCommand([command, ...args.map(String)]),
+  eval: (script, keys, args = []) => client.eval(script, {keys, arguments: args.map(String) }),
+  close: () => client.close(),
+});
+```
+
+This abridged excerpt omits the generated pipeline helper, which batches
+commands and rejects any `Error` result. Flue discovers the adapter during a
+Node build, checks and migrates its Redis namespace at server startup, and
+persists agent sessions, accepted submissions, workflow runs, and event streams
+so that they survive Flue process restarts. Durability across Redis server loss
+depends on the deployment's AOF or snapshot configuration.
 
 ## Configure
 

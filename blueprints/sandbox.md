@@ -61,13 +61,14 @@ These are the things that aren't obvious from the spec or the example.
   selected provider slug. Ask the user if their layout is unusual.
 - **Imports.** The published surface is `@flue/runtime`. Don't import
   from `@flue/runtime/internal` or any other internal path.
-- **Cancellation.** `SandboxApi.exec()` receives `timeout` (primary) and
-  optionally `signal`. Always forward `timeout` to the provider's native
-  timeout option when one exists — that's how the LLM bash tool stops a
+- **Cancellation.** `SandboxApi.exec()` receives `timeoutMs` in milliseconds
+  (primary) and optionally `signal`. Always forward `timeoutMs` to the provider's
+  native timeout option when one exists, converting units and rounding up when
+  the provider has coarser granularity — that's how the LLM bash tool stops a
   command. Forward `signal` only if the provider has a real cancellation
-  primitive (`AbortSignal`, process kill, cancel token); otherwise leave
-  it alone. The runtime does pre/post `signal.aborted` checks at the
-  `SandboxApi` boundary, so you don't need to add them yourself.
+  primitive (`AbortSignal`, process kill, cancel token); otherwise leave it
+  alone. The runtime does pre/post `signal.aborted` checks at the `SandboxApi`
+  boundary, so you don't need to add them yourself.
 - **Credentials.** If the provider needs secrets at runtime, never invent
   values for them. Let the project's conventions (`AGENTS.md`, an existing
   `.env` / `.dev.vars`, a secret manager, CI vars, etc.) decide where they

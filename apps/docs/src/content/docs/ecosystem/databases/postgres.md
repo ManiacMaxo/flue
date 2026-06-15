@@ -8,11 +8,45 @@ package:
 
 ## Quickstart
 
-Add Postgres as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared Postgres persistence to an existing Flue project with the [Postgres](https://www.postgresql.org) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database postgres
 ```
+
+## Overview
+
+The Postgres blueprint installs `@flue/postgres` and reuses an existing Postgres driver, or adds `pg` and the matching `@types/pg` development dependency by default. It creates a source-root `db.ts` and updates existing environment documentation when the project has it. The default generated adapter uses a pool for ordinary queries and keeps each transaction on one checked-out connection:
+
+```ts title="src/db.ts (abridged)"
+import { postgres } from '@flue/postgres';
+import { Pool } from 'pg';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+export default postgres({
+  query: async (text, params) => (await pool.query(text, params)).rows,
+  transaction: async (fn) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn({
+        query: async (text, params) => (await client.query(text, params)).rows,
+      });
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+  close: () => pool.end(),
+});
+```
+
+Flue discovers the adapter at build time and wires it into the generated Node server. On startup, it creates or verifies the required `flue_*` tables. Agent sessions, accepted submissions, and workflow-run records then survive process restarts and can be shared across replicas; application business data remains application-owned. The blueprint applies only to Node targets because Cloudflare deployments use Durable Object SQLite instead.
 
 ## Configure
 
@@ -25,8 +59,8 @@ For local development, `flue dev --env <file>` and `flue run --env <file>` load
 any `.env`-format file. In production, supply it from your platform's secret
 store.
 
-The blueprint installs `@flue/postgres`, helps you choose a Postgres driver,
-and writes a source-root `db.ts` that wraps it. Flue discovers `db.ts` at build
+The blueprint installs `@flue/postgres` with `pg` by default and writes a
+source-root `db.ts` that wraps it. Flue discovers `db.ts` at build
 time and wires it into the generated Node server. After running the command,
 your agents' sessions, accepted submissions, and workflow-run records persist to
 Postgres instead of in-memory state.
@@ -45,22 +79,6 @@ pooling, TLS, and every other connection option. A runner is three functions:
 resolving to result rows), `transaction` (runs its callback inside one
 transaction on a single connection), and `close`.
 
-With the [`postgres`](https://github.com/porsager/postgres) (porsager) driver:
-
-```ts title="src/db.ts"
-import { postgres, type PostgresQuery } from '@flue/postgres';
-import sql from 'postgres';
-
-const db = sql(process.env.DATABASE_URL!);
-
-export default postgres({
-  query: (text, params) => db.unsafe(text, params),
-  transaction: <T>(fn: (tx: { query: PostgresQuery }) => Promise<T>) =>
-    db.begin((tx) => fn({ query: (text, params) => tx.unsafe(text, params) })) as Promise<T>,
-  close: () => db.end(),
-});
-```
-
 With [`pg`](https://node-postgres.com/) (node-postgres), `transaction` checks
 out a single client and issues `BEGIN`/`COMMIT`/`ROLLBACK` itself — a pool
 cannot run a transaction across arbitrary connections:
@@ -75,17 +93,7 @@ export default postgres({
   query: async (text, params) => (await pool.query(text, params)).rows,
   transaction: async (fn) => {
     const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn({ query: async (t, p) => (await client.query(t, p)).rows });
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    // ...
   },
   close: () => pool.end(),
 });

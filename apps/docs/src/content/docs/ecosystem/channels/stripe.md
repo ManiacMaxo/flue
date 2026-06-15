@@ -8,11 +8,54 @@ package:
 
 ## Quickstart
 
-Add Stripe as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified webhook ingress and application-owned API behavior to an existing Flue project with the [Stripe](https://stripe.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel stripe
 ```
+
+## Overview
+
+The blueprint installs `@flue/stripe`, Stripe's official `stripe` SDK, and its
+required TypeScript peer when needed. It creates
+`<source-root>/channels/stripe.ts`, where the named `channel` export verifies
+snapshot webhook events by default and the project-owned `client` handles
+outbound API calls. Adapt the selected events, agent, and tool to the
+application.
+
+```ts title="src/channels/stripe.ts (abridged)"
+import Stripe from 'stripe';
+import { createStripeChannel } from '@flue/stripe';
+import { dispatch } from '@flue/runtime';
+import billing from '../agents/billing.ts';
+
+export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  httpClient: Stripe.createFetchHttpClient(),
+});
+
+export const channel = createStripeChannel({
+  client,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
+  async webhook({ event }) {
+    if (event.type !== 'checkout.session.completed') return;
+    const session = event.data.object;
+    const customerId =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    if (!customerId) return;
+
+    await dispatch(billing, {
+      id: customerId,
+      input: { type: `stripe.${event.type}`, eventId: event.id },
+    });
+  },
+});
+```
+
+A matching event is admitted to the billing agent identified by its Stripe
+customer. Other events receive an empty successful response. The generated
+module also defines a customer-bound retrieval tool; the blueprint wires that
+tool into the billing agent. For Cloudflare targets, the same SDK uses its Fetch
+and Web Crypto implementation.
 
 ## Configure
 

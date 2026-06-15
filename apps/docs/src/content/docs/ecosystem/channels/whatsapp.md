@@ -8,11 +8,57 @@ package:
 
 ## Quickstart
 
-Add WhatsApp as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified WhatsApp Business Cloud webhook ingress with project-owned outbound WhatsApp access to an existing Flue project with the [WhatsApp](https://developers.facebook.com/docs/whatsapp/cloud-api) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel whatsapp
 ```
+
+## Overview
+
+The blueprint installs `@flue/whatsapp` and `@kapso/whatsapp-cloud-api`, creates
+a source-root `channels/whatsapp.ts` module with named `channel` and
+project-owned `client` exports, and modifies the selected agent to bind the
+generated message tool.
+
+```ts title="src/channels/whatsapp.ts (abridged)"
+import { createWhatsAppChannel } from '@flue/whatsapp';
+import { dispatch } from '@flue/runtime';
+import { WhatsAppClient } from '@kapso/whatsapp-cloud-api';
+import assistant from '../agents/assistant.ts';
+
+export const client = new WhatsAppClient({
+  accessToken: process.env.WHATSAPP_ACCESS_TOKEN!,
+  graphVersion: 'v25.0',
+});
+
+export const channel = createWhatsAppChannel({
+  appSecret: process.env.WHATSAPP_APP_SECRET!,
+  verifyToken: process.env.WHATSAPP_VERIFY_TOKEN!,
+  async webhook({ payload }) {
+    for (const entry of payload.entry) {
+      for (const change of entry.changes) {
+        if (change.field !== 'messages') continue;
+        if (change.value.metadata.phone_number_id !== process.env.WHATSAPP_PHONE_NUMBER_ID)
+          continue;
+        for (const message of change.value.messages ?? []) {
+          if (message.type !== 'text' && message.type !== 'interactive') continue;
+          await dispatch(assistant, {
+            id: channel.conversationKey(conversationRef(entry.id, change.value, message)),
+            input: { type: `whatsapp.${message.type}`, messageId: message.id, message },
+          });
+        }
+      }
+    }
+  },
+});
+```
+
+The abridged example omits the generated `conversationRef` helper and outbound
+message tool. Once configured, supported messages continue the agent instance
+for the verified business-scoped user or group, and the bound client tool replies
+to that same destination. The Fetch-based client runs on Node and Cloudflare
+Workers with Flue's `nodejs_compat` setting.
 
 ## Configure
 

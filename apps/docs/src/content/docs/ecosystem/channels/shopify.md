@@ -8,11 +8,61 @@ package:
 
 ## Quickstart
 
-Add Shopify as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Shopify webhook ingress and application-owned Admin GraphQL behavior to an existing Flue project with the [Shopify](https://shopify.dev) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel shopify
 ```
+
+## Overview
+
+The blueprint installs `@flue/shopify` and the official lightweight
+`@shopify/admin-api-client`, creates a source-root `channels/shopify.ts` module
+with named `channel` and project-owned `client` exports, and modifies the
+selected orders agent to bind a generated Admin GraphQL tool. It also adds
+`@types/node` when the project needs the Admin client's declaration-only
+`Buffer` type.
+
+```ts title="src/channels/shopify.ts (abridged)"
+import { createAdminApiClient } from '@shopify/admin-api-client';
+import { createShopifyChannel } from '@flue/shopify';
+import { dispatch } from '@flue/runtime';
+import orders from '../agents/orders.ts';
+
+const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
+
+export const client = createAdminApiClient({
+  storeDomain: SHOP_DOMAIN,
+  apiVersion: '2026-04',
+  accessToken: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN!,
+});
+
+export const channel = createShopifyChannel({
+  clientSecret: process.env.SHOPIFY_CLIENT_SECRET!,
+  previousClientSecret: process.env.SHOPIFY_PREVIOUS_CLIENT_SECRET || undefined,
+  async webhook({ c, payload }) {
+    const shopDomain = c.req.header('x-shopify-shop-domain');
+    if (shopDomain !== SHOP_DOMAIN) {
+      return c.json({ error: 'Unexpected Shopify shop.' }, 403);
+    }
+    if (c.req.header('x-shopify-topic') !== 'orders/create') return;
+
+    const order = parseOrderCreatedPayload(payload);
+    if (!order) return c.json({ error: 'Unsupported orders/create payload.' }, 400);
+    await dispatch(orders, {
+      id: orderInstanceId(shopDomain, order.id),
+      input: { type: 'shopify.orders.create', orderId: order.id, orderName: order.name },
+    });
+  },
+});
+```
+
+The abridged example omits the generated payload parser, order-instance helpers,
+and Admin GraphQL tool. Once configured, an `orders/create` delivery continues
+the agent instance bound to that trusted shop and order, and the tool can
+retrieve that order without letting the model choose a shop, token, or order id.
+The same verified Fetch path runs on Node and Cloudflare Workers with Flue's
+`nodejs_compat` setting.
 
 ## Configure
 

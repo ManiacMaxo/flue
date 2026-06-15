@@ -8,11 +8,52 @@ package:
 
 ## Quickstart
 
-Add Notion as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified webhook ingress and application-owned API behavior to an existing Flue project with the [Notion](https://developers.notion.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel notion
 ```
+
+## Overview
+
+The blueprint installs `@flue/notion`, the official `@notionhq/client`, and its
+required TypeScript peer when needed. It creates
+`<source-root>/channels/notion.ts` with a named `channel`, project-owned
+`client`, local page identity helpers, and a page-bound retrieval tool, then
+wires that tool into an agent. It may also add `"node"` to a restrictive
+`compilerOptions.types` list.
+
+```ts title="src/channels/notion.ts (abridged)"
+import { Client } from '@notionhq/client';
+import { createNotionChannel } from '@flue/notion';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+
+export const client = new Client({ auth: process.env.NOTION_TOKEN! });
+
+export const channel = createNotionChannel({
+  verificationToken: process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN!,
+  async webhook({ event }) {
+    if (event.type !== 'page.content_updated') return;
+
+    await dispatch(assistant, {
+      id: `notion-page:${encodeURIComponent(event.entity.id)}`,
+      input: {
+        type: `notion.${event.type}`,
+        deliveryId: event.id,
+        pageId: event.entity.id,
+      },
+    });
+  },
+});
+```
+
+A matching page update is admitted to the agent identified by that page, while
+other verified events receive an empty successful response. The full generated
+module handles additional page events, injects a Fetch implementation for Node
+and Cloudflare portability, and lets the bound agent retrieve current page
+state. Initial webhook verification uses a temporary setup callback, described
+below, before recurring signed delivery can begin.
 
 ## Configure
 

@@ -21,10 +21,10 @@ platform. **It only works inside a Worker** — it cannot be invoked from a
 Node.js process. Because of that, Flue treats Cloudflare Sandbox as a
 first-class **build target**, not a drop-in adapter file.
 
-If the user is already on `--target cloudflare`: there is no adapter to
-install. Export the Sandbox class from the selected Flue source root's
-`cloudflare.ts`, declare the binding in `wrangler.jsonc`, and call
-`getSandbox(env.Sandbox, id)` in the agent. Skip to
+If the user is already on `--target cloudflare`: there is no project-owned
+adapter file to install. Export the Sandbox class from the selected Flue source
+root's `cloudflare.ts`, declare the binding in `wrangler.jsonc`, and wrap
+`getSandbox(env.Sandbox, id)` with `cloudflareSandbox(...)` in the agent. Skip to
 ["Path A"](#path-a-already-on---target-cloudflare) below.
 
 If the user is on `--target node` (or hasn't picked yet): adding Cloudflare
@@ -121,12 +121,13 @@ The short version, for your reference:
 
    ```ts
    import { createAgent, type FlueContext, type WorkflowRouteHandler } from '@flue/runtime';
+   import { cloudflareSandbox } from '@flue/runtime/cloudflare';
    import { getSandbox } from '@cloudflare/sandbox';
 
    export const route: WorkflowRouteHandler = async (_c, next) => next();
 
    export async function run ({ init, id, env, payload }: FlueContext<{ message: string }>) {
-     const sandbox = getSandbox(env.Sandbox, id);
+     const sandbox = cloudflareSandbox(getSandbox(env.Sandbox, id));
      const agent = createAgent(() => ({ sandbox, model: 'anthropic/claude-opus-4-7' }));
      const harness = await init(agent);
      const session = await harness.session();
@@ -135,10 +136,9 @@ The short version, for your reference:
    }
    ```
 
-   Note that `createAgent(() => ({ sandbox }))` here takes the result of `getSandbox()`
-   directly — there is no factory wrapper to import from `@flue/runtime`,
-   because Flue's SDK detects and adapts the `@cloudflare/sandbox` shape
-   internally on the Cloudflare target.
+   Pass the result of `getSandbox()` through `cloudflareSandbox(...)` before
+   supplying it to `createAgent()`. The wrapper is provided by
+   `@flue/runtime/cloudflare`, so no project-owned adapter file is needed.
 
 6. Tell the user to put local variables in `.dev.vars` or `.env` and run
    `flue dev --target cloudflare`, then `flue build --target cloudflare &&
@@ -217,8 +217,8 @@ without first confirming the basics work on `--target cloudflare`.
 ## Hard rules
 
 - **Do not** create a `sandboxes/cloudflare.ts` file under any source
-  directory. There is no factory function to install — Flue's SDK adapts
-  `@cloudflare/sandbox` internally on the Cloudflare target.
+  directory. Import `cloudflareSandbox` from `@flue/runtime/cloudflare`; no
+  project-owned adapter file is needed.
 - **Do not** silently migrate a Node-target project to Cloudflare. Always
   confirm first.
 - **Do not** invent a Cloudflare account, API token, or `account_id`. The

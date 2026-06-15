@@ -8,11 +8,40 @@ package:
 
 ## Quickstart
 
-Add MySQL as a persistence backend to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add durable, shared MySQL persistence to an existing Flue project with the [MySQL](https://www.mysql.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add database mysql
 ```
+
+## Overview
+
+The MySQL blueprint installs `@flue/mysql` and `mysql2` and creates a source-root `db.ts`. The generated adapter uses a pool for ordinary queries and keeps each transaction on one checked-out connection:
+
+```ts title="src/db.ts (abridged)"
+import { mysql, type MysqlQuery } from '@flue/mysql';
+import mysql2 from 'mysql2/promise';
+
+const pool = mysql2.createPool(process.env.MYSQL_URL!);
+
+const toRows = (result: unknown): Record<string, unknown>[] =>
+  Array.isArray(result) ? result.map((row) => ({ ...row })) : [];
+
+export default mysql({
+  query: async (text, params = []) => {
+    const [result] = await pool.execute(text, params);
+    return toRows(result);
+  },
+  transaction: async <T>(fn: (tx: { query: MysqlQuery }) => Promise<T>) => {
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
+    // ...
+  },
+  close: () => pool.end(),
+});
+```
+
+Flue discovers the adapter at build time and wires it into the generated Node server. On startup, it creates and verifies the required MySQL 8 InnoDB tables. Agent sessions, accepted submissions, and workflow-run records then survive process restarts and can be shared across replicas; application business data remains application-owned. The blueprint applies only to Node targets because Cloudflare deployments use Durable Object SQLite instead.
 
 ## Configure
 

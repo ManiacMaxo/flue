@@ -8,11 +8,44 @@ The E2B adapter adapts an initialized E2B sandbox from the `e2b` package into Fl
 
 ## Quickstart
 
-Add E2B as a sandbox to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add provider-managed Linux sandbox capability to an existing Flue project with the [E2B](https://e2b.dev) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```bash
 flue add sandbox e2b
 ```
+
+## Overview
+
+The blueprint installs `e2b` when needed and creates `sandboxes/e2b.ts` in your source-root. That file adapts an E2B sandbox that your application has already created; it does not create, retain, or close provider resources.
+
+```ts title="<source-root>/sandboxes/e2b.ts (abridged)"
+// flue-blueprint: sandbox/e2b@1
+import { createSandboxSessionEnv } from '@flue/runtime';
+import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
+import type { Sandbox as E2BSandbox } from 'e2b';
+
+class E2BSandboxApi implements SandboxApi {
+  constructor(private sandbox: E2BSandbox) {}
+
+  /* Implements file reads, writes, stat, listing, existence, and mkdir with sandbox.files. */
+
+  /* Implements rm() with sandbox.files.remove(); recursive and force remain provider-defined. */
+
+  /* Implements exec() with sandbox.commands.run(), forwarding timeoutMs unchanged. */
+}
+
+export function e2b(sandbox: E2BSandbox): SandboxFactory {
+  return {
+    async createSessionEnv(): Promise<SessionEnv> {
+      const sandboxCwd = '/home/user';
+      const api = new E2BSandboxApi(sandbox);
+      return createSandboxSessionEnv(api, sandboxCwd);
+    },
+  };
+}
+```
+
+Pass an initialized E2B `Sandbox` to `e2b(...)`, then assign the returned factory to an agent's `sandbox` property. Flue resolves workspace paths from `/home/user`, exposes E2B's files and commands through session operations, forwards command timeouts in milliseconds, and reports only the file metadata E2B exposes; your application remains responsible for sandbox configuration and lifecycle.
 
 ## Configure
 

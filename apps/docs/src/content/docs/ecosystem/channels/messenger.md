@@ -8,11 +8,53 @@ package:
 
 ## Quickstart
 
-Add Facebook Messenger as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Page webhook ingress and project-owned outbound Graph API access to an existing Flue project with the [Facebook Messenger](https://developers.facebook.com/docs/messenger-platform) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel messenger
 ```
+
+## Overview
+
+The Facebook Messenger blueprint installs `@flue/messenger`, creates a project-owned Graph API Fetch client at the source-root `messenger-client.ts`, and creates `channels/messenger.ts`. It also updates the selected agent to bind the generated reply tool to the verified Page conversation.
+
+```ts title="src/channels/messenger.ts (abridged)"
+import { createMessengerChannel } from '@flue/messenger';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { MessengerClient } from '../messenger-client.ts';
+
+export const client = new MessengerClient({
+  pageId: process.env.MESSENGER_PAGE_ID!,
+  pageAccessToken: process.env.MESSENGER_PAGE_ACCESS_TOKEN!,
+  graphVersion: 'v25.0',
+});
+
+export const channel = createMessengerChannel({
+  appSecret: process.env.MESSENGER_APP_SECRET!,
+  verifyToken: process.env.MESSENGER_VERIFY_TOKEN!,
+  pageId: process.env.MESSENGER_PAGE_ID!,
+  async webhook({ payload }) {
+    for (const entry of payload.entry) {
+      for (const event of entry.messaging ?? []) {
+        if (event.message === undefined || event.message.is_echo) continue;
+        const conversation = channel.conversationRef(event);
+        if (!conversation || event.message.text === undefined) continue;
+        await dispatch(assistant, {
+          id: channel.conversationKey(conversation),
+          input: {
+            type: 'messenger.message',
+            messageId: event.message.mid,
+            text: event.message.text,
+          },
+        });
+      }
+    }
+  },
+});
+```
+
+The abridged example omits the generated `postMessage()` tool and Graph client implementation. Only verified, non-echo text messages from `entry.messaging` are dispatched to the corresponding agent instance; replies return to the same participant through the tool bound by the complete blueprint. Other event families and Graph API operations remain subject to application policy, and the standards-based client supports Node and workerd.
 
 ## Configure
 

@@ -8,11 +8,54 @@ package:
 
 ## Quickstart
 
-Add Linear as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Linear resource and agent-session webhooks with project-owned outbound Linear API access to an existing Flue project with the [Linear](https://linear.app/developers) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel linear
 ```
+
+## Overview
+
+The blueprint installs `@flue/linear` and the official `@linear/sdk`, creates a
+source-root `channels/linear.ts` module with named `channel` and project-owned
+`client` exports, and modifies the selected agent to bind the generated message
+tool.
+
+```ts title="src/channels/linear.ts (abridged)"
+import { createLinearChannel } from '@flue/linear';
+import { dispatch } from '@flue/runtime';
+import { LinearClient } from '@linear/sdk';
+import assistant from '../agents/assistant.ts';
+
+export const client = new LinearClient({
+  apiKey: process.env.LINEAR_API_KEY!,
+});
+
+export const channel = createLinearChannel({
+  webhookSecret: process.env.LINEAR_WEBHOOK_SECRET!,
+  async webhook({ payload, deliveryId }) {
+    if (payload.type !== 'Comment' || !('body' in payload.data)) return;
+    const comment = payload.data;
+    if (payload.action !== 'create' || !comment.issueId) return;
+    await dispatch(assistant, {
+      id: channel.conversationKey({
+        type: 'issue',
+        organizationId: payload.organizationId,
+        issueId: comment.issueId,
+        ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
+      }),
+      input: { type: 'linear.comment.created', deliveryId, comment },
+    });
+  },
+});
+```
+
+The abridged example shows the generated comment path and omits the agent-session
+branch, reusable type guards, and message tool. Once configured, a new issue
+comment continues the agent instance for that issue or comment thread, while
+the bound SDK tool posts replies to the same Linear conversation. The official
+SDK also supports the generated agent-session path and runs with Flue's
+`nodejs_compat` setting on Cloudflare Workers.
 
 ## Configure
 

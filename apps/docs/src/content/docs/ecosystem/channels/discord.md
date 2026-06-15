@@ -9,11 +9,63 @@ lastReviewedAt: 2026-06-13
 
 ## Quickstart
 
-Add Discord as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Discord HTTP interactions and application-owned Discord REST behavior to an existing Flue project with the [Discord](https://discord.com) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel discord
 ```
+
+## Overview
+
+The blueprint installs `@flue/discord` and the community-maintained
+`@discordjs/rest` client. It creates a source-root `channels/discord.ts` module
+that verifies interactions, dispatches supported commands, exports a
+project-owned REST client and message tool, and modifies the selected agent to
+bind that tool to the interaction's trusted destination.
+
+```ts title="src/channels/discord.ts (abridged)"
+import { REST } from '@discordjs/rest';
+import { createDiscordChannel, type APIInteractionResponse } from '@flue/discord';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+
+export const client = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN!);
+
+export const channel = createDiscordChannel({
+  publicKey: process.env.DISCORD_PUBLIC_KEY!,
+  async interactions({ interaction }) {
+    if (interaction.type !== 2 || interaction.data.name !== 'ask') {
+      return {
+        type: 4,
+        data: { content: 'Unsupported interaction.', flags: 64 },
+      } satisfies APIInteractionResponse;
+    }
+
+    const destination = destinationFromInteraction(interaction);
+    if (!destination || destination.type === 'private') {
+      return {
+        type: 4,
+        data: { content: 'Unsupported interaction.', flags: 64 },
+      } satisfies APIInteractionResponse;
+    }
+
+    await dispatch(assistant, {
+      id: channel.conversationKey(destination),
+      input: { type: 'discord.command.ask', interactionId: interaction.id },
+    });
+    return {
+      type: 4,
+      data: { content: 'Your request was accepted.', flags: 64 },
+    } satisfies APIInteractionResponse;
+  },
+});
+```
+
+The abridged example omits the generated `destinationFromInteraction` helper
+and message tool. Once configured, an `ask` command continues the agent instance
+for its Discord destination, acknowledges the interaction, and lets that agent
+post messages through the bound REST tool. On Cloudflare Workers, the REST
+package selects its Fetch-based export and uses Flue's `nodejs_compat` setting.
 
 ## Configure
 
@@ -24,8 +76,8 @@ flue add channel discord
 
 The blueprint installs and configures `@flue/discord` for inbound HTTP
 interactions, along with a project-owned `@discordjs/rest` client for outbound
-API calls. After running the command, you will have a new
-`src/channels/discord.ts` module exporting `channel` and `client`.
+API calls. After running the command, you will have a new source-root
+`channels/discord.ts` module exporting `channel` and `client`.
 
 Discord does not publish an official JavaScript REST SDK. The blueprint uses the
 community-maintained `@discordjs/rest` client. Your application owns that client

@@ -137,8 +137,19 @@ function createWorkspaceSessionEnv(
 		},
 		async writeFile(path: string, content: string | Uint8Array): Promise<void> {
 			const resolved = resolvePath(path);
-			if (typeof content === 'string') await workspace.writeFile(resolved, content);
-			else await workspace.writeFileBytes(resolved, content);
+			const write = async (): Promise<void> => {
+				if (typeof content === 'string') await workspace.writeFile(resolved, content);
+				else await workspace.writeFileBytes(resolved, content);
+			};
+			try {
+				await write();
+			} catch {
+				const parent = resolved.slice(0, resolved.lastIndexOf('/')) || '/';
+				try {
+					await fs.mkdir(parent, { recursive: true });
+				} catch {}
+				await write();
+			}
 		},
 		async stat(path: string): Promise<FileStat> {
 			return adaptStat(await fs.stat(resolvePath(path)));

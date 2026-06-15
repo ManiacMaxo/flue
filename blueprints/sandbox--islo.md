@@ -94,7 +94,12 @@ class IsloSandboxApi implements SandboxApi {
 
 	async exec(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		const cd = options?.cwd ? `cd ${q(options.cwd)} && ` : '';
 		const envPrefix = options?.env
@@ -111,10 +116,12 @@ class IsloSandboxApi implements SandboxApi {
 		// image. On exceedance, `timeout` exits 124, which propagates through
 		// the CLI as our exit code.
 		const tmo =
-			typeof options?.timeout === 'number' ? `timeout ${options.timeout} ` : '';
-		const remote = `${tmo}${envPrefix}bash -lc ${q(cd + command)}`;
+			typeof options?.timeoutMs === 'number' ? `timeout ${options.timeoutMs / 1000} ` : '';
+		const remote = `${envPrefix}${tmo}bash -lc ${q(cd + command)}`;
 
 		const args = ['--output', 'json', 'use', this.name, '--', 'bash', '-lc', remote];
+		// The islo CLI has no cancellation primitive. The signal option is accepted
+		// for SandboxApi; Flue's runtime enforces pre/post signal checks.
 		return new Promise((resolve, reject) => {
 			const child = spawn(this.cliPath, args, {
 				env: process.env,
@@ -168,13 +175,25 @@ class IsloSandboxApi implements SandboxApi {
 	async stat(path: string): Promise<FileStat> {
 		const r = await this.exec(`stat -c '%F|%s|%Y' ${q(path)}`);
 		if (r.exitCode !== 0) throw new Error(`[flue:islo] stat ${path}: ${r.stderr}`);
-		const [type = '', size = '0', mtime = '0'] = r.stdout.trim().split('|');
+		const fields = r.stdout.trim().split('|');
+		const sizeValue = Number(fields[1]);
+		const mtimeValue = Number(fields[2]);
+		if (
+			fields.length !== 3 ||
+			!/^\d+$/.test(fields[1] ?? '') ||
+			!^-?\d+$/.test(fields[2] ?? '') ||
+			!Number.isFinite(sizeValue) ||
+			!Number.isFinite(mtimeValue)
+		) {
+			throw new Error(`[flue:islo] malformed stat output for ${path}: ${r.stdout}`);
+		}
+		const type = fields[0]!;
 		return {
 			isFile: type.startsWith('regular'),
 			isDirectory: type === 'directory',
 			isSymbolicLink: type === 'symbolic link',
-			size: Number.parseInt(size, 10) || 0,
-			mtime: new Date((Number.parseInt(mtime, 10) || 0) * 1000),
+			size: sizeValue,
+			mtime: new Date(mtimeValue * 1000),
 		};
 	}
 

@@ -5,11 +5,51 @@ description: Report Flue workflow failures and explicit error logs to Sentry on 
 
 ## Quickstart
 
-Add Sentry as an observability integration to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add error reporting to an existing Flue project with the [Sentry](https://sentry.io) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add tooling sentry
 ```
+
+## Overview
+
+The Sentry blueprint creates a source-root `sentry.ts` and imports it once from `app.ts`. On Node.js, the core of that generated bridge looks like this:
+
+```ts title="src/sentry.ts (abridged)"
+import { observe } from '@flue/runtime';
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  enabled: Boolean(process.env.SENTRY_DSN),
+  environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+  release: process.env.SENTRY_RELEASE,
+  tracesSampleRate: 0,
+});
+
+observe(
+  (event) => {
+    if (event.type === 'run_end' && event.isError) {
+      Sentry.captureException(toError(event.error));
+    }
+
+    if (event.type === 'log' && event.level === 'error') {
+      if (Object.hasOwn(event.attributes ?? {}, 'error')) {
+        Sentry.captureException(toError(event.attributes?.error));
+      } else {
+        Sentry.captureMessage(event.message, 'error');
+      }
+    }
+  },
+  { types: ['run_start', 'run_resume', 'run_end', 'log'] },
+);
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+```
+
+On Cloudflare, the generated `sentry.ts` contains the same observer bridge without calling `Sentry.init()`. Instead, the blueprint adds a module-local `cloudflare` extension to every discovered agent and workflow. The extension wraps the final generated Durable Object class with `instrumentDurableObjectWithSentry(...)`, while leaving the outer Worker uninstrumented.
 
 ## Configure
 

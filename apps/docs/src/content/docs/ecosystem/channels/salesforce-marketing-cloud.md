@@ -8,11 +8,63 @@ package:
 
 ## Quickstart
 
-Add Salesforce Marketing Cloud Engagement as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Event Notification Service ingress and application-owned REST behavior to an existing Flue project with the [Salesforce Marketing Cloud Engagement](https://developer.salesforce.com/docs/marketing/marketing-cloud/guide/ens.html) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel salesforce-marketing-cloud
 ```
+
+## Overview
+
+The blueprint installs `@flue/salesforce-marketing-cloud`. It creates a narrow
+Fetch client at `<source-root>/salesforce-marketing-cloud-client.ts`, family
+identity helpers at `<source-root>/salesforce-marketing-cloud-email.ts`, and
+`<source-root>/channels/salesforce-marketing-cloud.ts` with named `channel` and
+project-owned `client` exports. It also creates or updates an agent to bind a
+callback lookup tool to validated email-event identity. This integration is for
+Marketing Cloud Engagement ENS, not generic Salesforce APIs.
+
+```ts title="src/channels/salesforce-marketing-cloud.ts (abridged)"
+import { createSalesforceMarketingCloudChannel } from '@flue/salesforce-marketing-cloud';
+import { dispatch } from '@flue/runtime';
+import assistant from '../agents/assistant.ts';
+import { createSalesforceMarketingCloudClient } from '../salesforce-marketing-cloud-client.ts';
+import { emailEventInstanceId, emailRefFromEvent } from '../salesforce-marketing-cloud-email.ts';
+
+const callbackId = process.env.SALESFORCE_MARKETING_CLOUD_CALLBACK_ID!;
+export const client = createSalesforceMarketingCloudClient({
+  restBaseUrl: process.env.SALESFORCE_MARKETING_CLOUD_REST_BASE_URL!,
+  accessToken: process.env.SALESFORCE_MARKETING_CLOUD_ACCESS_TOKEN!,
+});
+
+export const channel = createSalesforceMarketingCloudChannel({
+  signatureKey: process.env.SALESFORCE_MARKETING_CLOUD_SIGNATURE_KEY!,
+  callbackId,
+  async events({ c, batch }) {
+    const usefulEvents = [];
+    for (const event of batch.events) {
+      if (event.eventCategoryType !== 'EngagementEvents.EmailOpen') continue;
+      const ref = emailRefFromEvent(callbackId, event);
+      if (!ref) return c.json({ error: 'Expected a supported email event.' }, 400);
+      usefulEvents.push({ event, ref });
+    }
+    for (const { event, ref } of usefulEvents) {
+      await dispatch(assistant, {
+        id: emailEventInstanceId(ref),
+        input: { type: `salesforce-marketing-cloud.${event.eventCategoryType}` },
+      });
+    }
+    return c.body(null, 204);
+  },
+});
+```
+
+Each valid selected email event in a signed batch is admitted to the agent bound
+to its callback and email tracking identity, then the batch receives `204`. The
+full generated module handles additional send and engagement families and lets
+the bound agent retrieve the configured callback. Callback registration, OAuth,
+token refresh, and the one-time `/ens-verify` call remain application-owned;
+Node and Cloudflare targets use the same Fetch and Web Crypto implementation.
 
 ## Configure
 

@@ -14,7 +14,12 @@ import type { SandboxFactory, SessionEnv } from '../types.ts';
 export interface CloudflareSandboxStub {
 	exec(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeout?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ success: boolean; stdout: string; stderr: string; exitCode?: number }>;
 	readFile(path: string, options?: { encoding?: string }): Promise<{ content: string }>;
 	writeFile(path: string, content: string, options?: { encoding?: string }): Promise<unknown>;
@@ -147,9 +152,6 @@ export function cfSandboxToSessionEnv(
 				signal?: AbortSignal;
 			},
 		): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-			// The Cloudflare sandbox API has no signal param, so we rely on
-			// `timeoutMs` for deadline enforcement and only observe `signal`
-			// before and after the remote call.
 			const externalSignal = execOpts?.signal;
 			if (externalSignal?.aborted) throw abortErrorFor(externalSignal);
 
@@ -158,6 +160,7 @@ export function cfSandboxToSessionEnv(
 				env: execOpts?.env,
 				// The Cloudflare sandbox `timeout` option is in milliseconds.
 				timeout: execOpts?.timeoutMs,
+				signal: externalSignal,
 			});
 
 			if (externalSignal?.aborted) throw abortErrorFor(externalSignal);

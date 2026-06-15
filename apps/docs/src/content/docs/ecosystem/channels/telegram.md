@@ -8,11 +8,48 @@ package:
 
 ## Quickstart
 
-Add Telegram as an inbound channel to any existing Flue project by running the following command in your terminal or coding agent of choice.
+Add verified Telegram Bot API webhook ingress with project-owned outbound Telegram access to an existing Flue project with the [Telegram](https://core.telegram.org/bots/api) blueprint. Run the following command in your terminal or coding agent of choice:
 
 ```sh
 flue add channel telegram
 ```
+
+## Overview
+
+The blueprint installs `@flue/telegram` and grammY, creates a source-root
+`channels/telegram.ts` module with named `channel` and project-owned `client`
+exports, and modifies the selected agent to bind the generated message tool.
+
+```ts title="src/channels/telegram.ts (abridged)"
+import { createTelegramChannel } from '@flue/telegram';
+import { dispatch } from '@flue/runtime';
+import { Api } from 'grammy';
+import assistant from '../agents/assistant.ts';
+
+export const client = new Api(process.env.TELEGRAM_BOT_TOKEN!);
+
+export const channel = createTelegramChannel({
+  secretToken: process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN!,
+  async webhook({ update }) {
+    const incoming = update.message ?? update.channel_post ?? update.business_message;
+    if (!incoming) return;
+    await dispatch(assistant, {
+      id: channel.conversationKey(conversationFromMessage(incoming)),
+      input: {
+        type: 'telegram.message',
+        updateId: update.update_id,
+        message: incoming,
+      },
+    });
+  },
+});
+```
+
+The abridged example omits the generated `conversationFromMessage` helper,
+callback-query branch, and message tool. Once configured, an incoming message
+continues the agent instance for its chat, business chat, or topic, and the
+bound grammY tool replies to that same destination. grammY's Fetch export runs
+on Node and Cloudflare Workers with Flue's `nodejs_compat` setting.
 
 ## Configure
 

@@ -145,15 +145,28 @@ class BoxdSandboxApi implements SandboxApi {
 		if (result.exitCode !== 0) {
 			throw new Error(`[flue:boxd] stat failed for ${path}: ${result.stdout || result.stderr}`);
 		}
-		const [type = '', sizeStr = '0', mtimeStr = '0'] = result.stdout.trim().split('|');
-		const size = Number.parseInt(sizeStr, 10);
-		const mtimeSecs = Number.parseInt(mtimeStr, 10);
+		const fields = result.stdout.trim().split('|');
+		const [type, sizeStr, mtimeStr] = fields;
+		const size = Number(sizeStr);
+		const mtimeSecs = Number(mtimeStr);
+		const mtime = new Date(mtimeSecs * 1000);
+		if (
+			fields.length !== 3 ||
+			!sizeStr ||
+			!mtimeStr ||
+			!Number.isSafeInteger(size) ||
+			size < 0 ||
+			!Number.isSafeInteger(mtimeSecs) ||
+			!Number.isFinite(mtime.getTime())
+		) {
+			throw new Error(`[flue:boxd] malformed stat output for ${path}`);
+		}
 		return {
 			isFile: type === 'regular file' || type === 'regular empty file',
 			isDirectory: type === 'directory',
 			isSymbolicLink: type === 'symbolic link',
-			size: Number.isFinite(size) ? size : 0,
-			mtime: new Date((Number.isFinite(mtimeSecs) ? mtimeSecs : 0) * 1000),
+			size,
+			mtime,
 		};
 	}
 
@@ -185,11 +198,9 @@ class BoxdSandboxApi implements SandboxApi {
 	}
 
 	async rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
-		const flags: string[] = [];
-		if (options?.recursive) flags.push('-r');
-		if (options?.force) flags.push('-f');
-		const flagStr = flags.length ? `${flags.join('')} ` : '';
-		const result = await this.runShell(`rm ${flagStr}${shellQuote(path)}`);
+		const flags = `${options?.recursive ? 'r' : ''}${options?.force ? 'f' : ''}`;
+		const flagArg = flags ? `-${flags} ` : '';
+		const result = await this.runShell(`rm ${flagArg}${shellQuote(path)}`);
 		if (result.exitCode !== 0) {
 			throw new Error(`[flue:boxd] rm failed for ${path}: ${result.stdout || result.stderr}`);
 		}
@@ -197,25 +208,32 @@ class BoxdSandboxApi implements SandboxApi {
 
 	async exec(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		return this.runShell(command, options);
 	}
 
 	private async runShell(
 		command: string,
-		options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+		options?: {
+			cwd?: string;
+			env?: Record<string, string>;
+			timeoutMs?: number;
+			signal?: AbortSignal;
+		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		const wrapped = options?.cwd
 			? `cd ${shellQuote(options.cwd)} && ${command}`
 			: command;
-		// Flue passes `timeout` in seconds (per the adapter spec); boxd
-		// expects milliseconds.
-		const timeoutMs =
-			typeof options?.timeout === 'number' ? options.timeout * 1000 : undefined;
+		// Flue and boxd both express command timeouts in milliseconds.
 		const result = await this.box.exec(['bash', '-lc', wrapped], {
 			env: options?.env,
-			timeoutMs,
+			timeoutMs: options?.timeoutMs,
 		});
 		return {
 			stdout: result.stdout,

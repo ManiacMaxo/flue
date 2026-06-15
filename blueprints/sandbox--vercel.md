@@ -109,20 +109,20 @@ class VercelSandboxApi implements SandboxApi {
 		options?: {
 			cwd?: string;
 			env?: Record<string, string>;
-			timeout?: number;
+			timeoutMs?: number;
 			signal?: AbortSignal;
 		},
 	): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 		// Vercel's SDK accepts an AbortSignal directly, so we forward both
-		// `timeout` (synthesized as a signal) and the caller's `signal`.
+		// `timeoutMs` (synthesized as a signal) and the caller's `signal`.
 		// Compose them with AbortSignal.any so whichever fires first wins:
 		//   - timeout-only  → recoverable 124-shape ShellResult.
 		//   - caller-only   → rethrow so the host abort propagates.
 		//   - both          → if the caller's signal fired, propagate;
 		//                     otherwise treat as timeout.
 		const timeoutSignal =
-			typeof options?.timeout === 'number'
-				? AbortSignal.timeout(options.timeout * 1000)
+			typeof options?.timeoutMs === 'number'
+				? AbortSignal.timeout(options.timeoutMs)
 				: undefined;
 		const callerSignal = options?.signal;
 		const signal =
@@ -153,7 +153,7 @@ class VercelSandboxApi implements SandboxApi {
 			if (aborted) {
 				return {
 					stdout: '',
-					stderr: `[flue:vercel] Command timed out after ${options?.timeout} seconds.`,
+					stderr: `[flue:vercel] Command timed out after ${options?.timeoutMs} milliseconds.`,
 					exitCode: 124,
 				};
 			}
