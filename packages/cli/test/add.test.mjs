@@ -52,6 +52,7 @@ before(async () => {
 			braintrust: 'tooling--braintrust.md',
 			sentry: 'tooling--sentry.md',
 			github: 'channel--github.md',
+			gitlab: 'channel--gitlab.md',
 			stripe: 'channel--stripe.md',
 			notion: 'channel--notion.md',
 			resend: 'channel--resend.md',
@@ -104,6 +105,10 @@ describe('flue add', () => {
 		const result = await runCli(['add']);
 		assert.equal(result.code, 0);
 		assert.match(result.stderr, /flue add channel github\s+channel\s+https:\/\/github\.com/);
+		assert.match(
+			result.stderr,
+			/flue add channel gitlab\s+channel\s+https:\/\/docs\.gitlab\.com\/user\/project\/integrations\/webhooks\//,
+		);
 		assert.match(result.stderr, /flue add channel stripe\s+channel\s+https:\/\/stripe\.com/);
 		assert.match(
 			result.stderr,
@@ -197,6 +202,19 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('@kapso/whatsapp-cloud-api@^0.2.1'));
 		assert.ok(result.stdout.includes('/channels/whatsapp/webhook'));
 		assert.ok(result.stdout.includes('X-Hub-Signature-256'));
+	});
+
+	it('prints the GitLab blueprint with signed and legacy webhook support', async () => {
+		const result = await runCli(['add', 'channel', 'gitlab', '--print']);
+
+		assert.equal(result.code, 0);
+		assert.ok(result.stdout.includes('@flue/gitlab'));
+		assert.ok(result.stdout.includes('/channels/gitlab/webhook'));
+		assert.ok(result.stdout.includes('GITLAB_WEBHOOK_SIGNING_TOKEN'));
+		assert.ok(result.stdout.includes('GITLAB_WEBHOOK_SECRET_TOKEN'));
+		assert.ok(result.stdout.includes('webhook-signature'));
+		assert.ok(result.stdout.includes('X-Gitlab-Token'));
+		assert.ok(result.stdout.includes('fake Fetch'));
 	});
 
 	it('prints the Stripe blueprint with snapshot and thin event support', async () => {

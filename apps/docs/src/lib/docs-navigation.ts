@@ -83,6 +83,7 @@ export const docsSections: DocsSection[] = [
 					{ title: 'Provider API', slug: 'api/provider-api' },
 					{ title: 'Routing API', slug: 'api/routing-api' },
 					{ title: 'GitHub Channel', slug: 'api/github-channel' },
+					{ title: 'GitLab Channel', slug: 'api/gitlab-channel' },
 					{ title: 'Stripe Channel', slug: 'api/stripe-channel' },
 					{ title: 'Notion Channel', slug: 'api/notion-channel' },
 					{ title: 'Resend Channel', slug: 'api/resend-channel' },

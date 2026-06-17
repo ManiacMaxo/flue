@@ -58,6 +58,13 @@ export const channels: EcosystemItem[] = [
 		homepageRank: 14,
 	},
 	{
+		name: 'GitLab',
+		href: '/docs/ecosystem/channels/gitlab/',
+		icon: 'https://svgl.app/library/gitlab.svg',
+		background: '#ffffff',
+		keywords: 'gitlab webhooks issues merge requests',
+	},
+	{
 		name: 'Google Chat',
 		href: '/docs/ecosystem/channels/google-chat/',
 		icon: 'https://svgl.app/library/google-chat.svg',
